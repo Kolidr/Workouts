@@ -448,6 +448,8 @@ dialog::backdrop { background: #050507c2; }
   --type-width: 91px;
   --number-width: 72px;
   overflow: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline-start: calc(var(--type-width) + var(--number-width));
   max-height: min(61vh, 650px);
   margin-top: 11px;
   border: 1px solid var(--line);
@@ -457,6 +459,7 @@ dialog::backdrop { background: #050507c2; }
 .history-table th, .history-table td { vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .history-table thead th, .history-table tbody th { background: #222226; font-size: .8rem; font-weight: 650; }
 .history-table thead th { position: sticky; top: 0; z-index: 2; }
+.history-table thead th:has(time) { scroll-snap-align: start; }
 .history-table .history-type, .history-table .history-number {
   position: sticky;
   z-index: 1;
@@ -568,4 +571,7 @@ dialog::backdrop { background: #050507c2; }
   .table-head, .set-row, .rest-row { grid-template-columns: minmax(87px, 1fr) 40px minmax(79px, .8fr) 29px; }
   .set-note { width: 29px; }
   .import-actions > .button { width: 100%; }
+  .history-scroll { --type-width: 68px; --number-width: 55px; }
+  .history-table td { min-width: 132px; }
+  .history-table td small { white-space: normal; }
 }
