@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101012">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Local Panel</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="muscles.js"></script>
+  <script defer src="fit.js"></script>
+  <script defer src="storage.js"></script>
+  <script defer src="preview.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <button type="button" class="wordmark" data-action="programs">Local Panel</button>
+      <nav class="navigation" aria-label="Основное меню"></nav>
+    </div>
+  </header>
+  <main id="app" class="shell"></main>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <div class="notice" id="notice" role="status" hidden></div>
+</body>
+</html>
