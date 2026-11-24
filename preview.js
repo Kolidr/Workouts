@@ -235,13 +235,15 @@ function plan(item) {
     const status = statuses[index];
     const rest = recorded?.restBefore;
     const type = isWarm ? 'Разминка' : index >= setCount(item) ? 'Доп. подход' : 'Рабочий';
+    const label = status === 'done' ? `Подход ${index + 1}. Выполнено. Снять отметку`
+      : `${status === 'skipped' ? 'Вернуть пропущенный подход' : 'Выбрать подход'} ${index + 1}`;
     return `${rest == null ? '' : `<div class="rest-row"><span aria-label="Отдых перед подходом ${index + 1}, ${restTime(rest)}">Отдых ${restTime(rest)}</span></div>`}
     <div class="set-row ${isActive ? 'is-current' : ''}" ${isActive ? 'aria-current="step"' : ''}>
       ${index < count ? `
       <button type="button" class="set-name set-picker ${status || ''}" data-action="${status ? 'undo-set' : 'select-set'}"
-        data-index="${index}" aria-label="${status === 'done' ? 'Отменить выполнение подхода' : status === 'skipped' ? 'Вернуть пропущенный подход' : 'Выбрать подход'} ${index + 1}">
+        data-index="${index}" aria-label="${label}" ${status === 'done' ? 'title="Снять отметку"' : ''}>
         <span class="set-index">${status === 'done' ? icon('check') : status === 'skipped' ? icon('skip') : index + 1}</span>
-        <span>${type}${status ? `<small>${status === 'done' ? 'Выполнен' : 'Пропущен'} ${icon('undo')}</small>` : ''}</span>
+        <span>${type}${status === 'done' ? '<small>Выполнено</small>' : status === 'skipped' ? `<small>Пропущен ${icon('undo')}</small>` : ''}</span>
       </button>` : `<span class="set-name">${type}</span>`}
       <strong>${index >= count ? '—' : isWarm ? ['15–20', '10–12'][index] : escapeText(item.reps)}</strong>
       <span class="history-value">${setResult(recorded)}</span>
