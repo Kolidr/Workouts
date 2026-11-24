@@ -72,6 +72,25 @@ function describeMovement(slot, variant = 0) {
   return { id: move.id, title: move.title, alternative: move !== slot };
 }
 
+const exerciseNoteLimit = 32000;
+
+function joinExerciseNotes(notes) {
+  return [...new Set(notes.filter(Boolean))].join('\n\n');
+}
+
+function cleanExerciseNotes(raw, program) {
+  const byExercise = new Map();
+  for (const [key, text] of Object.entries(isObject(raw) ? raw : {})) {
+    const match = key.match(/^(\d+)-(\d+)(?:-\d+-(?:exercise|\d+))?$/);
+    if (!match || !program.days[Number(match[1])]?.[Number(match[2])] || typeof text !== 'string' ||
+        text.length > exerciseNoteLimit) continue;
+    const slot = `${match[1]}-${match[2]}`;
+    if (!byExercise.has(slot)) byExercise.set(slot, []);
+    byExercise.get(slot).push(text);
+  }
+  return Object.fromEntries([...byExercise].map(([slot, notes]) => [slot, joinExerciseNotes(notes)]));
+}
+
 function unpackDocument(document) {
   const fail = () => { throw new Error('Файл не соответствует формату приложения.'); };
   const string = (value, max) => typeof value === 'string' && value.length <= max ? value : fail();
@@ -190,7 +209,7 @@ function cleanSnapshot(raw, program, knownIds, fail) {
     }
   }));
   const links = Object.fromEntries(Object.entries(stringEntries(raw.links)).filter(([id, url]) => knownIds.has(id) && cleanLink(url)));
-  return { imported, variants: variantChoices, progress, focus, notes: stringEntries(raw.notes),
+  return { imported, variants: variantChoices, progress, focus, notes: cleanExerciseNotes(raw.notes, program),
     links, updatedAt: number(raw.updatedAt) ?? 0 };
 }
 
@@ -250,9 +269,17 @@ function alignProgramRecord(record, source, target) {
     const next = ids.get(id);
     if (next && (id === next || !Object.hasOwn(links, next))) links[next] = link;
   }
+  const notes = {};
+  for (const [key, text] of Object.entries(cleanExerciseNotes(record.notes, source))) {
+    const [day, index] = key.split('-').map(Number);
+    const next = layouts[day]?.[index]?.find(Boolean);
+    if (next) {
+      const newKey = `${day}-${next.index}`;
+      notes[newKey] = joinExerciseNotes([notes[newKey], text]);
+    }
+  }
   return {
-    ...record, variants, imported,
-    notes: remap(record.notes, (first, second) => first && second && first !== second ? `${first}\n${second}` : first || second),
+    ...record, variants, imported, notes,
     progress: remap(record.progress, (first, second) => ({ ...first, ...second })),
     focus: remap(record.focus, first => first),
     links

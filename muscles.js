@@ -27,8 +27,7 @@ const bodyOutline = `M64 4C58 4 53 8 53 14V20C53 25 55 28 57 30L57 37
   C73 28 75 25 75 20V14C75 8 70 4 64 4Z`;
 const frontRegions = {
   traps: 'M57 39Q59 41 62 42L62 46Q56 44 50 45Z',
-  sideDelts: 'M41 45Q30 47 26 62L25 66Q30 58 35 54Q39 49 46 47Z',
-  frontDelts: 'M46 47Q39 49 35 54Q29 60 25 67Q32 62 38 58Q44 53 52 48Z',
+  frontDelts: 'M49 47C39 43 29 48 26 61L25 68C33 58 40 50 49 47Z',
   chest: 'M61 49C58 47 52 48 47 50C40 53 36 56 36 61C36 68 41 72 48 73C54 74 61 72 62 67L62 54Q62 50 61 49Z',
   serratus: 'M42 75Q45 77 49 76Q47 84 48 91Q48 98 50 102Q44 99 43 94Z',
   abs: 'M61 75C54 72 50 77 50 82L50 94C50 102 55 112 62 115L62 79Q62 76 61 75Z',
@@ -36,15 +35,12 @@ const frontRegions = {
   biceps: 'M35 62C36 75 31 82 28 86C24 91 19 94 19 89C19 80 25 69 35 62Z',
   forearms: 'M22 92C28 90 28 97 23 104C20 111 14 117 11 119C6 122 9 114 10 110C13 101 16 94 22 92Z',
   quads: 'M43 123C46 124 50 130 53 135C59 144 57 152 54 160C52 167 48 173 45 171C40 168 39 156 38 145C38 137 39 128 43 123Z',
-  adductors: 'M44 113Q51 115 58 120L62 126L58 145Q56 137 51 131Q45 124 44 113Z',
-  shins: 'M50 186Q53 187 51 197L49 218Q47 225 46 218Q45 205 47 195Q48 189 50 186Z',
-  calves: 'M42 188C46 186 46 195 45 201L44 217Q43 225 41 217C38 204 39 192 42 188Z'
+  adductors: 'M44 113Q51 115 58 120L62 126L58 145Q56 137 51 131Q45 124 44 113Z'
 };
 const backRegions = {
   traps: 'M62 34C60 40 50 43 41 47L51 51Q55 51 56 58L62 71Z',
   midBack: 'M51 51Q57 50 62 54L62 78Q58 74 55 66Q53 59 51 51Z',
-  rearDelts: 'M39 49Q33 50 29 57L26 65Q34 62 41 57L49 51Q44 51 39 49Z',
-  sideDelts: 'M36 48Q29 52 26 60L25 66L28 65Q31 55 36 48Z',
+  rearDelts: 'M38 48C30 50 27 58 25 67C34 64 42 57 49 51Q42 50 38 48Z',
   lats: 'M50 54C52 66 56 73 61 79C56 82 55 90 50 94C45 89 43 80 43 72L42 61Q47 58 50 54Z',
   lowerBack: 'M62 80C57 81 57 91 52 96Q54 101 62 104Z',
   triceps: 'M41 62Q41 75 34 83L34 75Q31 79 27 81Q30 68 41 62Z',
@@ -57,8 +53,10 @@ const backRegions = {
 function muscleFigure(item, rear) {
   const regions = rear ? backRegions : frontRegions;
   const regionPaths = Object.entries(regions).map(([group, coordinates]) => {
-    const emphasis = item.major.includes(group) ? 'muscle-major' : item.minor.includes(group) ? 'muscle-minor' : 'muscle-inactive';
-    return `<path class="${emphasis}" d="${coordinates}"/>`;
+    const groups = group.endsWith('Delts') ? [group, 'sideDelts'] : [group];
+    const emphasis = groups.some(name => item.major.includes(name)) ? 'muscle-major'
+      : groups.some(name => item.minor.includes(name)) ? 'muscle-minor' : 'muscle-inactive';
+    return `<path class="${emphasis}" data-muscle="${group}" d="${coordinates}"/>`;
   }).join('');
   return `<figure class="muscle-figure">
     <svg viewBox="-8 0 144 250" aria-hidden="true">

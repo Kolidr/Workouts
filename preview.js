@@ -4,7 +4,7 @@ const notice = document.querySelector('#notice');
 const state = {
   screen: 'programs', day: 0, exercise: 0, progress: {}, focus: {}, notes: {}, variants: {}, links: {},
   draft: null, imported: [], importError: '', fileRequest: 0, program: null, media: {}, revision: 0, updatedAt: 0,
-  pendingRestore: null, busy: false
+  pendingRestore: null, busy: false, techniqueJob: null
 };
 let days = [];
 let writes = Promise.resolve();
@@ -67,7 +67,7 @@ function movementAt(day, position, variant = 0) {
 }
 const exercise = () => movementAt(state.day, state.exercise, selectedVariant(state.day, state.exercise));
 const exerciseKey = () => `${slotKey(state.day, state.exercise)}-${selectedVariant(state.day, state.exercise)}`;
-const noteKey = (set = 'exercise') => `${exerciseKey()}-${set}`;
+const noteKey = () => slotKey(state.day, state.exercise);
 const displayDate = date => date.split('-').reverse().join('.');
 const listWeight = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 });
 function setResult(set) {
@@ -107,7 +107,8 @@ function applyWorkspace(record, media) {
   state.program = record.program;
   state.revision = record.revision;
   state.updatedAt = record.updatedAt || 0;
-  for (const key of ['notes', 'variants', 'progress', 'focus', 'links']) state[key] = record[key] || {};
+  for (const key of ['variants', 'progress', 'focus', 'links']) state[key] = record[key] || {};
+  state.notes = cleanExerciseNotes(record.notes, record.program);
   state.imported = record.imported || [];
   state.draft = null;
   state.day = 0;
@@ -155,7 +156,7 @@ function technique(item) {
       </figcaption>
     </figure>`;
   return `<section class="media" aria-label="Техника упражнения">${preview}
-    <button type="button" class="technique-link" data-action="full-technique">Полная техника ${icon('external')}</button>
+    <button type="button" class="technique-link" data-action="full-technique">Полная техника ${icon('play')}</button>
   </section>`;
 }
 
@@ -243,7 +244,6 @@ function plan(item) {
       </button>` : `<span class="set-name">${type}</span>`}
       <strong>${index >= count ? '—' : isWarm ? ['15–20', '10–12'][index] : escapeText(item.reps)}</strong>
       <span class="history-value">${setResult(recorded)}</span>
-      <button type="button" class="icon-button set-note ${state.notes[noteKey(index)] ? 'has-note' : ''}" data-action="note" data-index="${index}" aria-label="Комментарий к подходу ${index + 1}">${icon('notes')}</button>
     </div>${rest != null && index < rowCount - 1 ? `
     <div class="rest-row"><span>Отдых ${restTime(rest)}</span></div>` : ''}`;
   }).join('');
@@ -255,7 +255,7 @@ function plan(item) {
     ${showMovement ? `<p class="previous-movement">Прошлая тренировка · ${movementLabel(history.movement)}</p>` : ''}
     <div class="table-head">
       <span>Подход</span><span>Повт.</span>
-      <span>${history ? `<time datetime="${history.date}">${displayDate(history.date)}</time>` : 'Нет истории'}</span><span></span>
+      <span>${history ? `<time datetime="${history.date}">${displayDate(history.date)}</time>` : 'Нет истории'}</span>
     </div>
     <div class="set-table">${rows}</div>
     <div class="plan-footer">
@@ -284,7 +284,7 @@ function workout() {
           <div><h1>${escapeText(item.title)}</h1><p class="exercise-prescription">${escapeText(setSummary(item))}</p>
             ${item.alternative ? `<p class="alternative">${escapeText(item.alternative)}</p>` : ''}</div>
           <div class="exercise-tools">
-            <button type="button" class="icon-button exercise-note ${state.notes[noteKey()] ? 'has-note' : ''}" data-action="note" aria-label="Комментарий к упражнению" title="Комментарий к упражнению">${icon('notes')}</button>
+            <button type="button" class="button secondary exercise-note ${state.notes[noteKey()] ? 'has-note' : ''}" data-action="note" aria-label="Комментарий к упражнению">${icon('notes')} Заметка</button>
             <button type="button" class="button secondary history-link" data-action="history" aria-label="История упражнения">${icon('history')} История</button>
           </div>
         </div>
@@ -462,10 +462,15 @@ function dataScreen() {
   return `<section class="page transfer">
     <h1>Данные</h1>
     <p class="intro">Материалы и записи хранятся в браузере. Резервную копию можно перенести на другое устройство.</p>
-    ${state.program ? `<div class="data-panel"><div><h2>Выгрузить все данные</h2><p>Резервная копия в JSON.</p></div>
+    ${state.program ? `<div class="data-panel"><div><h2>Выгрузить программу и записи</h2><p>Резервная копия с короткими роликами.</p></div>
       ${button('Выгрузить', 'backup')}</div>` : ''}
     <div class="data-panel"><div><h2>Восстановить данные</h2><p>Личный пакет или резервная копия.</p></div>
       ${choosePackage}</div>
+    ${state.program ? `<div class="data-panel"><div><h2>Видео с полной техникой</h2>
+      <p id="technique-status" role="status">Проверяем локальное хранилище…</p></div>
+      <label class="button secondary file-label technique-file-label">Загрузить видео с полной техникой
+        <input id="technique-file" type="file" accept=".json,application/json" ${state.techniqueJob ? 'disabled' : ''}>
+      </label></div>` : ''}
   </section>`;
 }
 
@@ -492,6 +497,7 @@ function render(scroll = true) {
   app.innerHTML = screens[state.screen]();
   if (scroll) window.scrollTo(0, 0);
   setupVideo();
+  if (state.screen === 'data' && state.program) refreshTechniqueStatus();
 }
 
 function openDialog(title, content, className = '') {
@@ -501,12 +507,12 @@ function openDialog(title, content, className = '') {
   dialog.showModal();
 }
 
-function openNote(index) {
-  const key = noteKey(index);
-  openDialog(index === undefined ? 'Комментарий к упражнению' : `Комментарий к подходу ${Number(index) + 1}`, `
+function openNote() {
+  const key = noteKey();
+  openDialog('Комментарий к упражнению', `
     <p class="intro">День ${state.day + 1} · ${escapeText(exercise().title)}</p>
     <form id="note-form" data-key="${key}"><label for="note-text">Комментарий</label>
-      <textarea id="note-text" rows="4" maxlength="500" autofocus>${escapeText(state.notes[key] || '')}</textarea>
+      <textarea id="note-text" rows="4" maxlength="${exerciseNoteLimit}" autofocus>${escapeText(state.notes[key] || '')}</textarea>
       <button class="button primary" type="submit">Сохранить</button>
     </form>`);
 }
@@ -655,19 +661,144 @@ async function exportWorkspace() {
   }
 }
 
+async function refreshTechniqueStatus() {
+  const status = document.querySelector('#technique-status');
+  if (!status) return;
+  const { techniqueJob, program } = state;
+  if (techniqueJob?.programId === program.id) {
+    status.textContent = techniqueJob.message;
+    return;
+  }
+  try {
+    const library = await readTechniqueLibrary(program.id);
+    status.textContent = library ? `Загружено видео: ${library.videos.length}.` : 'Загрузите отдельный JSON с полными видео для этой программы.';
+  } catch {
+    status.textContent = 'Не удалось прочитать хранилище видео.';
+  }
+}
+
+async function loadTechniqueFile(file) {
+  if (state.techniqueJob || !state.program) return;
+  const job = { programId: state.program.id, message: 'Читаем пакет видео…' };
+  state.techniqueJob = job;
+  render(false);
+  try {
+    const library = await importTechniqueLibrary(file, job.programId, (loaded, count) => {
+      job.message = `Загружаем видео: ${loaded} из ${count}.`;
+      if (state.screen === 'data') refreshTechniqueStatus();
+    });
+    announce(`Загружено видео: ${library.videos.length}.`);
+  } catch (error) {
+    announce(error.message || 'Не удалось загрузить видео.');
+  } finally {
+    state.techniqueJob = null;
+    if (state.screen === 'data') render(false);
+  }
+}
+
 let fullVideoUrl;
-function fullTechnique(item) {
+let fullVideoRequest = 0;
+let fullVideoLibrary;
+
+function releaseFullVideo() {
+  if (fullVideoUrl) URL.revokeObjectURL(fullVideoUrl);
+  fullVideoUrl = undefined;
+}
+
+function mountFullVideo(slot, blob) {
+  releaseFullVideo();
+  fullVideoUrl = URL.createObjectURL(blob);
+  const video = document.createElement('video');
+  video.src = fullVideoUrl;
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  slot.replaceChildren(video);
+}
+
+async function showFullVideo(index) {
+  const library = fullVideoLibrary;
+  const entry = library?.videos.find(video => video.index === index);
+  const slot = dialog.querySelector('#full-video-slot');
+  if (!entry || !slot) return;
+  const request = ++fullVideoRequest;
+  releaseFullVideo();
+  for (const choice of dialog.querySelectorAll('[data-action="choose-full-video"]')) {
+    choice.setAttribute('aria-pressed', String(Number(choice.dataset.index) === index));
+  }
+  const original = dialog.querySelector('[data-action="download-full-original"]');
+  original.dataset.index = index;
+  slot.textContent = 'Открываем видео…';
+  try {
+    const blob = await readTechniqueVideo(library.batch, index, 'playback');
+    if (!slot.isConnected || !dialog.open || request !== fullVideoRequest) return;
+    if (!blob) throw new Error();
+    mountFullVideo(slot, blob);
+  } catch {
+    if (slot.isConnected && request === fullVideoRequest) slot.textContent = 'Не удалось открыть видео. Можно скачать оригинал.';
+  }
+}
+
+async function downloadFullOriginal(index) {
+  const library = fullVideoLibrary;
+  const entry = library?.videos.find(video => video.index === index);
+  if (!entry) return;
+  try {
+    const blob = await readTechniqueVideo(library.batch, index, 'original');
+    if (!blob) throw new Error();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = entry.filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch {
+    announce('Не удалось скачать оригинал видео.');
+  }
+}
+
+async function fullTechnique(item) {
   const link = cleanLink(state.links[item.id]) || item.source;
+  const slot = days[state.day][state.exercise];
+  const moves = [slot, ...slot.variants];
+  const matching = new Map(moves.flatMap(move => [move.id, ...(move.previousIds || [])].map(id => [id, move])));
   openDialog('Полная техника', `<p class="intro">${escapeText(item.title)}</p>
-    ${link ? `<p><a href="${escapeText(link)}" target="_blank" rel="noopener noreferrer">Открыть видео</a></p>` : ''}
-    <label class="button secondary file-label">Открыть видео с устройства
-      <input id="full-video-file" type="file" accept="video/*,.mov,.mp4"></label>
+    <div id="full-video-library">Ищем загруженные видео…</div>
     <div id="full-video-slot"></div>
-    <form id="link-form" data-id="${item.id}">
+    <details class="other-video"><summary>Открыть другое видео</summary>
+      ${link ? `<p><a href="${escapeText(link)}" target="_blank" rel="noopener noreferrer">Открыть сохранённую ссылку</a></p>` : ''}
+      <label class="button secondary file-label">Открыть видео с устройства
+        <input id="full-video-file" type="file" accept="video/*,.mov,.mp4"></label>
+      <form id="link-form" data-id="${item.id}">
       <label for="technique-url">Ссылка на видео</label>
       <input id="technique-url" type="url" maxlength="2048" value="${escapeText(link || '')}" placeholder="https://…">
       <button type="submit" class="button primary">Сохранить ссылку</button>
-    </form>`);
+    </form></details>`);
+  const list = dialog.querySelector('#full-video-library');
+  try {
+    const library = await readTechniqueLibrary(state.program.id);
+    if (!list.isConnected || !dialog.open) return;
+    const videos = library?.videos.filter(video => matching.has(video.movement)) || [];
+    if (!videos.length) {
+      list.innerHTML = `<p class="intro">Видео для этого упражнения можно загрузить во вкладке «Данные».</p>
+        ${button('Перейти в «Данные»', 'load-technique-screen')}`;
+      return;
+    }
+    fullVideoLibrary = { batch: library.batch, videos };
+    const options = moves.flatMap(move => {
+      const choices = videos.filter(video => matching.get(video.movement) === move);
+      return choices.map((video, index) => ({
+        ...video, label: choices.length > 1 ? `${move.title} · Видео ${index + 1}` : move.title
+      }));
+    });
+    list.innerHTML = `<div class="full-video-choices" aria-label="Видео упражнения">${options.length > 1 ?
+      options.map(video => button(escapeText(video.label), 'choose-full-video', 'secondary',
+        `data-index="${video.index}" aria-pressed="false" title="${escapeText(video.filename)}"`)).join('') : ''}</div>
+      ${button('Скачать оригинал', 'download-full-original', 'quiet')}`;
+    await showFullVideo((videos.find(video => matching.get(video.movement).id === item.id) || videos[0]).index);
+  } catch {
+    if (list.isConnected) list.textContent = 'Не удалось прочитать хранилище видео.';
+  }
 }
 
 document.addEventListener('click', async event => {
@@ -700,6 +831,16 @@ document.addEventListener('click', async event => {
     case 'full-technique':
       fullTechnique(exercise());
       return;
+    case 'load-technique-screen':
+      dialog.close();
+      state.screen = 'data';
+      break;
+    case 'choose-full-video':
+      await showFullVideo(Number(index));
+      return;
+    case 'download-full-original':
+      await downloadFullOriginal(Number(index));
+      return;
     case 'toggle-video': {
       const video = document.querySelector('#technique-video');
       if (video.paused) video.play().catch(() => announce('Не удалось запустить видео.'));
@@ -707,7 +848,7 @@ document.addEventListener('click', async event => {
       return;
     }
     case 'note':
-      openNote(index);
+      openNote();
       return;
     case 'close':
       dialog.close();
@@ -815,6 +956,10 @@ app.addEventListener('change', async event => {
     const file = target.files[0];
     target.value = '';
     if (file) await readPersonalFile(file);
+  } else if (target.id === 'technique-file') {
+    const file = target.files[0];
+    target.value = '';
+    if (file) await loadTechniqueFile(file);
   } else if (target.id === 'movement-variant') {
     state.variants[slotKey(state.day, state.exercise)] = Number(target.value);
     saveLocal();
@@ -880,20 +1025,17 @@ app.addEventListener('change', async event => {
 
 dialog.addEventListener('change', event => {
   if (event.target.id !== 'full-video-file' || !event.target.files.length) return;
-  if (fullVideoUrl) URL.revokeObjectURL(fullVideoUrl);
-  fullVideoUrl = URL.createObjectURL(event.target.files[0]);
-  const video = document.createElement('video');
-  video.src = fullVideoUrl;
-  video.controls = true;
-  video.playsInline = true;
-  document.querySelector('#full-video-slot').replaceChildren(video);
+  fullVideoRequest++;
+  for (const choice of dialog.querySelectorAll('[data-action="choose-full-video"]')) choice.setAttribute('aria-pressed', 'false');
+  mountFullVideo(dialog.querySelector('#full-video-slot'), event.target.files[0]);
 });
 
 dialog.addEventListener('close', () => {
   const video = dialog.querySelector('video');
   video?.pause();
-  if (fullVideoUrl) URL.revokeObjectURL(fullVideoUrl);
-  fullVideoUrl = undefined;
+  fullVideoRequest++;
+  fullVideoLibrary = undefined;
+  releaseFullVideo();
 });
 
 dialog.addEventListener('submit', async event => {
@@ -919,9 +1061,7 @@ dialog.addEventListener('submit', async event => {
   state.notes[key] = saved;
   try { await saveLocal(); } catch { return; }
   dialog.close();
-  app.querySelectorAll('[data-action="note"]').forEach(control => {
-    control.classList.toggle('has-note', Boolean(state.notes[noteKey(control.dataset.index)]));
-  });
+  app.querySelector('.exercise-note')?.classList.toggle('has-note', Boolean(state.notes[noteKey()]));
   announce('Комментарий сохранён.');
 });
 

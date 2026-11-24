@@ -134,7 +134,7 @@ h1 {
 }
 .icon-button:hover { background: var(--raised); }
 .icon-button svg { height: 19px; width: 19px; }
-.exercise-note { border: 1px solid var(--line); background: var(--surface); }
+.exercise-note { white-space: nowrap; }
 .has-note { color: var(--red) !important; }
 .workout-content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(350px, .99fr); gap: 18px; align-items: start; }
 .media, .plan, .file-panel, .data-panel {
@@ -211,7 +211,7 @@ h1 {
 .current-status i { height: 6px; width: 6px; border-radius: 50%; background: var(--red); }
 .table-head, .set-row, .rest-row {
   display: grid;
-  grid-template-columns: minmax(102px, 1.1fr) minmax(43px, .56fr) minmax(86px, .92fr) 32px;
+  grid-template-columns: minmax(102px, 1.1fr) minmax(43px, .56fr) minmax(86px, .92fr);
   align-items: center;
   gap: 4px;
   padding: 0 6px;
@@ -223,8 +223,6 @@ h1 {
 .set-index { display: inline-grid; place-content: center; width: 17px; color: var(--secondary); font-size: .74rem; flex: none; }
 .set-index svg { width: 14px; height: 14px; }
 .history-value { color: #d0ced2; font-size: .82rem; white-space: nowrap; }
-.set-note { width: 32px; height: 42px; color: var(--secondary); }
-.set-note svg { width: 17px; height: 17px; }
 .rest-row { min-height: 25px; font-size: .77rem; }
 .rest-row span { grid-column: 3; color: var(--secondary); white-space: nowrap; }
 .plan-footer { padding-top: 11px; border-top: 1px solid var(--line); }
@@ -437,14 +435,14 @@ dialog::backdrop { background: #050507c2; }
 .muscles-content { display: grid; gap: 10px; margin-top: 10px; }
 .muscles-figures {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
-  border-radius: 13px; background: #fafafa; padding: 10px 6px 9px;
+  padding: 6px 0;
 }
-.muscle-figure { display: grid; justify-items: center; align-items: end; gap: 5px; color: #45454c; font-size: .79rem; }
+.muscle-figure { display: grid; justify-items: center; align-items: end; gap: 5px; color: var(--secondary); font-size: .79rem; }
 .muscle-figure svg { width: min(100%, 158px); height: auto; }
-.body-outline { fill: #fafafa; stroke: #dedee0; stroke-width: 1.05; stroke-linejoin: round; }
-.muscle-inactive { fill: #e2e2e4; stroke: #fafafa; stroke-width: .6; }
-.muscle-major { fill: #df3038; stroke: #fafafa; stroke-width: .6; }
-.muscle-minor { fill: #f4b931; stroke: #fafafa; stroke-width: .6; }
+.body-outline { fill: var(--surface); stroke: #71717a; stroke-width: 1.05; stroke-linejoin: round; }
+.muscle-inactive { fill: #494950; stroke: var(--surface); stroke-width: .6; }
+.muscle-major { fill: #df3038; stroke: var(--surface); stroke-width: .6; }
+.muscle-minor { fill: #f4b931; stroke: var(--surface); stroke-width: .6; }
 .muscle-labels { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; min-width: 0; }
 .muscle-labels dt { color: var(--secondary); font-size: .74rem; }
 .muscle-labels dd { margin: 1px 0 0; font-size: .84rem; font-weight: 620; }
@@ -485,7 +483,15 @@ dialog::backdrop { background: #050507c2; }
 .history-table td small { color: var(--secondary); font-size: .72rem; }
 .dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
 #dialog .file-label { margin: 10px 0 0; }
+.data-panel .technique-file-label { margin-left: 0; white-space: normal; }
+.technique-file-label:has(input:disabled) { opacity: .65; cursor: wait; }
+.full-video-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.full-video-choices .button { white-space: normal; text-align: start; }
+.full-video-choices .button[aria-pressed="true"] { border-color: var(--red); }
+#full-video-slot { margin-top: 6px; }
 #full-video-slot video { width: 100%; max-height: 54vh; margin-top: 10px; background: #090909; }
+.other-video { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.other-video summary { cursor: pointer; color: var(--secondary); }
 #link-form { margin-top: 11px; }
 #link-form label { display: block; margin-bottom: 4px; color: var(--secondary); font-size: .86rem; }
 #technique-url { width: 100%; min-height: 39px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--background); }
@@ -540,7 +546,6 @@ dialog::backdrop { background: #050507c2; }
   .exercise-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin: 3px 0 11px; gap: 5px 9px; }
   .exercise-heading > div:first-child { display: contents; }
   .exercise-heading h1 { grid-column: 1 / -1; font-size: clamp(1.62rem, 7.2vw, 2.1rem); }
-  .exercise-note { width: 37px; height: 37px; }
   .exercise-prescription { font-size: .87rem; margin: 0; }
   .exercise-heading .alternative { grid-column: 1 / -1; grid-row: 3; }
   .exercise-heading .exercise-tools { grid-column: 2; grid-row: 2; }
@@ -563,6 +568,8 @@ dialog::backdrop { background: #050507c2; }
   .file-panel { flex-wrap: wrap; gap: 9px; padding: 11px; }
   .file-panel > div:nth-child(2) { flex: 1; }
   .file-label { margin-left: 46px; }
+  .data-panel { display: grid; justify-items: start; }
+  .data-panel .file-label { margin-left: 0; max-width: 100%; }
   .import-fields { gap: 7px; }
   .import-fields select { font-size: .84rem; }
   .review-header h2 { font-size: 1.05rem; }
@@ -579,8 +586,7 @@ dialog::backdrop { background: #050507c2; }
 }
 @media (max-width: 370px) {
   .shell { width: calc(100% - 26px); }
-  .table-head, .set-row, .rest-row { grid-template-columns: minmax(87px, 1fr) 40px minmax(79px, .8fr) 29px; }
-  .set-note { width: 29px; }
+  .table-head, .set-row, .rest-row { grid-template-columns: minmax(87px, 1fr) 40px minmax(79px, .8fr); }
   .import-actions > .button { width: 100%; }
   .history-scroll { --type-width: 68px; --number-width: 55px; }
   .history-table td { min-width: 132px; }
