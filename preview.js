@@ -2,7 +2,7 @@ const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 const notice = document.querySelector('#notice');
 const state = {
-  screen: 'programs', day: 0, exercise: 0, progress: {}, focus: {}, notes: {}, variants: {}, links: {},
+  screen: 'programs', day: 0, exercise: 0, progress: {}, focus: {}, notes: {}, noteUpdatedAt: {}, variants: {}, links: {},
   draft: null, imported: [], importError: '', fileRequest: 0, program: null, media: {}, revision: 0, updatedAt: 0,
   pendingRestore: null, pendingGarmin: null, garminDeleted: [], busy: false, techniqueJob: null
 };
@@ -82,8 +82,8 @@ function restTime(seconds) {
 }
 
 function workspaceRecord() {
-  const { program, notes, variants, imported, garminDeleted, progress, focus, links, updatedAt } = state;
-  return { program, notes, variants, imported, garminDeleted, progress, focus, links, updatedAt };
+  const { program, notes, noteUpdatedAt, variants, imported, garminDeleted, progress, focus, links, updatedAt } = state;
+  return { program, notes, noteUpdatedAt, variants, imported, garminDeleted, progress, focus, links, updatedAt };
 }
 
 function saveLocal() {
@@ -109,6 +109,7 @@ function applyWorkspace(record, media) {
   state.updatedAt = record.updatedAt || 0;
   for (const key of ['variants', 'progress', 'focus', 'links']) state[key] = record[key] || {};
   state.notes = cleanExerciseNotes(record.notes, record.program);
+  state.noteUpdatedAt = noteTimes(record.noteUpdatedAt, state.notes);
   Object.assign(state, mergeGarmin({ imported: record.imported || [], garminDeleted: record.garminDeleted }, { imported: [] }));
   state.draft = null;
   state.day = 0;
@@ -147,7 +148,7 @@ function technique(item) {
       ${item.clip ? `
       <button class="video-surface" type="button" data-action="toggle-video" aria-label="Пауза">
         <video id="technique-video" src="${mediaUrl(item.clip)}" ${item.poster ? `poster="${mediaUrl(item.poster)}"` : ''}
-          muted autoplay loop playsinline preload="auto"></video>
+          muted loop playsinline disablepictureinpicture disableremoteplayback x-webkit-airplay="deny" preload="auto"></video>
         <span class="video-control">${icon('pause')}</span>
       </button>` : ''}
       <figcaption class="technique-copy ${item.clip ? '' : 'text-technique'}">
@@ -163,7 +164,7 @@ function technique(item) {
 function recordedHistory() {
   const slot = days[state.day][state.exercise];
   const matches = workout => workout.day === state.day && workout.mapping.includes(state.exercise);
-  return state.imported.filter(matches).sort(compareGarmin).map(workout => ({
+  return state.imported.filter(matches).sort((first, second) => compareGarmin(second, first)).map(workout => ({
       date: workout.date,
       movement: workout.performed?.[state.exercise] || describeMovement(slot, workout.variants?.[state.exercise]),
       sets: withRestBefore(workout).filter((_, index) => workout.mapping[index] === state.exercise)
@@ -225,7 +226,7 @@ function historyDialog(item) {
 function plan(item) {
   const warm = item.warm || 0;
   const { limit: count, active, statuses } = progressFor(item);
-  const history = recordedHistory().at(-1);
+  const history = recordedHistory()[0];
   const showMovement = history && (history.movement.alternative || history.movement.id !== item.id);
   const rowCount = Math.max(count, history?.sets.length || 0);
   const rows = Array.from({ length: rowCount }, (_, index) => {
@@ -490,10 +491,10 @@ function review(draft, expanded = new Set()) {
 function dataScreen() {
   return `<section class="page transfer">
     <h1>Данные</h1>
-    <p class="intro">Переносите записи Garmin между устройствами с помощью JSON.</p>
-    ${state.program ? `<div class="data-panel"><div><h2>Выгрузить записи Garmin</h2><p>Скачайте резервную копию или перетащите кнопку выгрузки.</p></div>
+    <p class="intro">Переносите тренировки Garmin и заметки к упражнениям с помощью JSON.</p>
+    ${state.program ? `<div class="data-panel"><div><h2>Выгрузить тренировки и заметки</h2><p>Скачайте резервную копию или перетащите кнопку выгрузки.</p></div>
       ${button('Выгрузить', 'backup', 'secondary', 'draggable="true"')}</div>
-    <div class="data-panel" data-file-drop="garmin-backup-file"><div><h2>Восстановить записи Garmin</h2>
+    <div class="data-panel" data-file-drop="garmin-backup-file"><div><h2>Восстановить тренировки и заметки</h2>
       <p>Перетащите JSON сюда или выберите файл.</p></div>
       <label class="button primary file-label">Выбрать файл<input type="file" id="garmin-backup-file" accept=".json,application/json"></label></div>`
       : `<div class="data-panel"><p>Сначала загрузите файл программы.</p>${button('Открыть программы', 'programs')}</div>`}
@@ -505,8 +506,35 @@ function dataScreen() {
   </section>`;
 }
 
+let previewToResume;
+let mediaPageHidden = false;
+
+function detachVideo(video) {
+  video.muted = true;
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  video.remove();
+}
+
+function suspendPreview() {
+  const video = document.querySelector('#technique-video');
+  if (video && !video.paused) {
+    previewToResume = video;
+    video.pause();
+  }
+}
+
+function resumePreview() {
+  if (document.hidden || mediaPageHidden || dialog.open || !previewToResume) return;
+  const video = previewToResume;
+  previewToResume = undefined;
+  if (video.isConnected) video.play().catch(() => {});
+}
+
 function setupVideo() {
   const video = document.querySelector('#technique-video');
+  previewToResume = video || undefined;
   if (!video) return;
   const control = video.closest('button');
   const setControl = () => {
@@ -515,8 +543,11 @@ function setupVideo() {
   };
   video.addEventListener('play', setControl);
   video.addEventListener('pause', setControl);
+  video.defaultMuted = true;
   video.muted = true;
-  video.play().catch(setControl);
+  video.volume = 0;
+  setControl();
+  resumePreview();
 }
 
 function render(scroll = true) {
@@ -525,6 +556,8 @@ function render(scroll = true) {
   document.querySelector('.navigation').innerHTML = tabs.filter(([action]) => state.program || ['programs', 'data'].includes(action)).map(([action, symbol, text]) => `
     <button type="button" data-action="${action}" ${action === current ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${text}</span></button>
   `).join('');
+  const preview = app.querySelector('#technique-video');
+  if (preview) detachVideo(preview);
   app.innerHTML = screens[state.screen]();
   if (scroll) window.scrollTo(0, 0);
   setupVideo();
@@ -532,6 +565,7 @@ function render(scroll = true) {
 }
 
 function openDialog(title, content, className = '') {
+  suspendPreview();
   dialog.className = className;
   dialog.innerHTML = `<div class="dialog-header"><h2 id="dialog-title">${title}</h2>
     <button type="button" class="icon-button" data-action="close" aria-label="Закрыть">${icon('close')}</button></div>${content}`;
@@ -628,9 +662,9 @@ async function readPersonalFile(file) {
 }
 
 function mergeRecords(current, incoming) {
-  const merged = { ...current, ...mergeGarmin(current, incoming) };
+  const merged = { ...current, ...mergeGarmin(current, incoming), ...mergeExerciseNotes(current, incoming) };
   const later = incoming.updatedAt >= current.updatedAt ? incoming : current;
-  for (const key of ['notes', 'variants', 'links']) merged[key] = { ...current[key], ...incoming[key], ...later[key] };
+  for (const key of ['variants', 'links']) merged[key] = { ...current[key], ...incoming[key], ...later[key] };
   merged.progress = later.progress;
   merged.focus = later.focus;
   return merged;
@@ -642,7 +676,7 @@ async function restoreWorkspace(merge) {
   state.busy = true;
   try {
     await writes;
-    const blank = { notes: {}, links: {}, variants: {}, progress: {}, focus: {}, imported: [], garminDeleted: [], updatedAt: 0 };
+    const blank = { notes: {}, noteUpdatedAt: {}, links: {}, variants: {}, progress: {}, focus: {}, imported: [], garminDeleted: [], updatedAt: 0 };
     const incoming = pending.snapshot || blank;
     const keepProgram = merge && (state.program.edition || 1) > pending.program.edition;
     const program = keepProgram ? state.program : pending.program;
@@ -666,7 +700,7 @@ async function restoreWorkspace(merge) {
 
 function garminArchive() {
   const blob = garminBackupDocument(workspaceRecord());
-  const filename = `garmin-${new Intl.DateTimeFormat('sv-SE').format(new Date())}.json`;
+  const filename = `workouts-${new Intl.DateTimeFormat('sv-SE').format(new Date())}.json`;
   return new File([blob], filename, { type: blob.type });
 }
 
@@ -693,13 +727,13 @@ async function readGarminBackup(file) {
   state.busy = true;
   const program = state.program;
   try {
-    if (file.size > 160 * 1024 * 1024) throw new Error('Выберите резервную копию Garmin размером до 160 МБ.');
+    if (file.size > 160 * 1024 * 1024) throw new Error('Выберите резервную копию размером до 160 МБ.');
     const records = unpackGarminBackup(JSON.parse(await file.text()), program);
     if (state.screen !== 'data' || state.program !== program) return;
     state.pendingGarmin = records;
-    openDialog('Восстановить записи Garmin?', `<p class="intro">Тренировок в файле: ${records.imported.length}.
-      Отметок об удалении: ${records.garminDeleted.length}.</p>
-      ${button('Восстановить записи', 'confirm-garmin-restore', 'primary')}`);
+    openDialog('Восстановить тренировки и заметки?', `<p class="intro">Тренировки: ${records.imported.length}. Заметки: ${Object.values(records.notes).filter(Boolean).length}.
+      Удаления тренировок: ${records.garminDeleted.length}. Удаления заметок: ${Object.values(records.notes).filter(note => !note).length}.</p>
+      ${button('Восстановить данные', 'confirm-garmin-restore', 'primary')}`);
   } catch (error) {
     announce(error instanceof SyntaxError ? 'Файл не удалось прочитать как JSON.' : error.message);
   } finally {
@@ -710,8 +744,8 @@ async function readGarminBackup(file) {
 async function commitGarmin(incoming) {
   if (state.busy) return false;
   state.busy = true;
-  const before = { imported: state.imported, garminDeleted: state.garminDeleted };
-  Object.assign(state, mergeGarmin(before, incoming));
+  const before = { imported: state.imported, garminDeleted: state.garminDeleted, notes: state.notes, noteUpdatedAt: state.noteUpdatedAt };
+  Object.assign(state, mergeGarmin(before, incoming), mergeExerciseNotes(before, incoming));
   try {
     await saveLocal();
     return true;
@@ -769,18 +803,42 @@ let fullVideoRequest = 0;
 let fullVideoLibrary;
 
 function releaseFullVideo() {
+  const video = dialog.querySelector('#full-video-slot video');
+  if (video) detachVideo(video);
+  if ((video || fullVideoUrl) && navigator.mediaSession) {
+    navigator.mediaSession.metadata = null;
+    navigator.mediaSession.playbackState = 'none';
+  }
   if (fullVideoUrl) URL.revokeObjectURL(fullVideoUrl);
   fullVideoUrl = undefined;
+}
+
+function closeFullTechnique() {
+  if (!dialog.open || !dialog.querySelector('#full-video-slot')) return;
+  fullVideoRequest++;
+  releaseFullVideo();
+  dialog.close();
 }
 
 function mountFullVideo(slot, blob) {
   releaseFullVideo();
   fullVideoUrl = URL.createObjectURL(blob);
   const video = document.createElement('video');
-  video.src = fullVideoUrl;
   video.controls = true;
   video.playsInline = true;
   video.preload = 'metadata';
+  video.disablePictureInPicture = true;
+  video.disableRemotePlayback = true;
+  video.setAttribute('x-webkit-airplay', 'deny');
+  const finish = () => {
+    if (video.isConnected) closeFullTechnique();
+  };
+  video.addEventListener('ended', finish);
+  video.addEventListener('webkitendfullscreen', finish);
+  video.addEventListener('play', () => {
+    if (document.hidden || mediaPageHidden) finish();
+  });
+  video.src = fullVideoUrl;
   slot.replaceChildren(video);
 }
 
@@ -919,7 +977,8 @@ document.addEventListener('click', async event => {
       openNote();
       return;
     case 'close':
-      dialog.close();
+      if (dialog.querySelector('#full-video-slot')) closeFullTechnique();
+      else dialog.close();
       return;
     case 'mark': case 'skip-set': case 'select-set': case 'undo-set':
       updatePlan(action, Number(index));
@@ -1043,7 +1102,7 @@ document.addEventListener('click', async event => {
       if (state.pendingGarmin && await commitGarmin(state.pendingGarmin)) {
         state.pendingGarmin = null;
         dialog.close();
-        announce('Записи Garmin синхронизированы.');
+        announce('Тренировки и заметки синхронизированы.');
       }
       return;
     case 'confirm-restore': case 'confirm-merge':
@@ -1193,11 +1252,27 @@ app.addEventListener('change', async event => {
 });
 
 dialog.addEventListener('close', () => {
-  const video = dialog.querySelector('video');
-  video?.pause();
+  if (dialog.open) return;
   fullVideoRequest++;
   fullVideoLibrary = undefined;
   releaseFullVideo();
+  resumePreview();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    suspendPreview();
+    closeFullTechnique();
+  } else resumePreview();
+});
+window.addEventListener('pagehide', () => {
+  mediaPageHidden = true;
+  suspendPreview();
+  closeFullTechnique();
+});
+window.addEventListener('pageshow', () => {
+  mediaPageHidden = false;
+  resumePreview();
 });
 
 dialog.addEventListener('submit', async event => {
@@ -1220,8 +1295,19 @@ dialog.addEventListener('submit', async event => {
   }
   const key = event.target.dataset.key;
   const saved = dialog.querySelector('#note-text').value.trim();
-  state.notes[key] = saved;
-  try { await saveLocal(); } catch { return; }
+  const note = state.notes[key];
+  const stamp = state.noteUpdatedAt[key] || 0;
+  if (saved !== (note || '')) {
+    const previousNotes = state.notes;
+    const previousTimes = state.noteUpdatedAt;
+    state.notes = { ...state.notes, [key]: saved };
+    state.noteUpdatedAt = { ...state.noteUpdatedAt, [key]: Math.max(Date.now(), stamp + 1) };
+    try { await saveLocal(); } catch {
+      state.notes = previousNotes;
+      state.noteUpdatedAt = previousTimes;
+      return;
+    }
+  }
   dialog.close();
   app.querySelector('.exercise-note')?.classList.toggle('has-note', Boolean(state.notes[noteKey()]));
   announce('Комментарий сохранён.');

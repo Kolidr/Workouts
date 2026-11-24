@@ -92,6 +92,24 @@ function cleanExerciseNotes(raw, program) {
   return Object.fromEntries([...byExercise].map(([slot, notes]) => [slot, joinExerciseNotes(notes)]));
 }
 
+function noteTimes(raw, notes) {
+  return Object.fromEntries(Object.keys(notes).map(key => {
+    const stamp = isObject(raw) ? raw[key] : undefined;
+    return [key, Number.isSafeInteger(stamp) && stamp >= 0 ? stamp : 0];
+  }));
+}
+
+function mergeExerciseNotes(current, incoming) {
+  const notes = { ...current.notes };
+  const noteUpdatedAt = noteTimes(current.noteUpdatedAt, notes);
+  for (const [key, stamp] of Object.entries(noteTimes(incoming.noteUpdatedAt, incoming.notes || {}))) {
+    if (Object.hasOwn(notes, key) && noteUpdatedAt[key] >= stamp) continue;
+    notes[key] = incoming.notes[key];
+    noteUpdatedAt[key] = stamp;
+  }
+  return { notes, noteUpdatedAt };
+}
+
 function unpackDocument(document) {
   const fail = () => { throw new Error('Файл не соответствует формату приложения.'); };
   const string = (value, max) => typeof value === 'string' && value.length <= max ? value : fail();
@@ -256,8 +274,10 @@ function cleanSnapshot(raw, program, knownIds, fail) {
     }
   }));
   const links = Object.fromEntries(Object.entries(stringEntries(raw.links)).filter(([id, url]) => knownIds.has(id) && cleanLink(url)));
+  const notes = cleanExerciseNotes(raw.notes, program);
   return { ...mergeGarmin({ imported, garminDeleted }, { imported: [] }), variants: variantChoices, progress, focus,
-    notes: cleanExerciseNotes(raw.notes, program), links, updatedAt: Number.isFinite(raw.updatedAt) && raw.updatedAt >= 0 ? raw.updatedAt : 0 };
+    notes, noteUpdatedAt: noteTimes(raw.noteUpdatedAt, notes), links,
+    updatedAt: Number.isFinite(raw.updatedAt) && raw.updatedAt >= 0 ? raw.updatedAt : 0 };
 }
 
 function alignProgramRecord(record, source, target) {
@@ -317,16 +337,20 @@ function alignProgramRecord(record, source, target) {
     if (next && (id === next || !Object.hasOwn(links, next))) links[next] = link;
   }
   const notes = {};
-  for (const [key, text] of Object.entries(cleanExerciseNotes(record.notes, source))) {
+  const noteUpdatedAt = {};
+  const sourceNotes = cleanExerciseNotes(record.notes, source);
+  const stamps = noteTimes(record.noteUpdatedAt, sourceNotes);
+  for (const [key, text] of Object.entries(sourceNotes)) {
     const [day, index] = key.split('-').map(Number);
     const next = layouts[day]?.[index]?.find(Boolean);
     if (next) {
       const newKey = `${day}-${next.index}`;
       notes[newKey] = joinExerciseNotes([notes[newKey], text]);
+      noteUpdatedAt[newKey] = Math.max(noteUpdatedAt[newKey] || 0, stamps[key]);
     }
   }
   return {
-    ...record, variants, imported, notes,
+    ...record, variants, imported, notes, noteUpdatedAt,
     progress: remap(record.progress, (first, second) => ({ ...first, ...second })),
     focus: remap(record.focus, first => first),
     links
@@ -348,8 +372,20 @@ function portableGarminWorkouts(rows, program) {
 function garminBackupDocument(record) {
   return new Blob([JSON.stringify({
     format: garminBackupFormat, version: 1, programId: record.program.id,
-    workouts: portableGarminWorkouts(record.imported, record.program), deleted: record.garminDeleted || []
+    workouts: portableGarminWorkouts(record.imported, record.program), deleted: record.garminDeleted || [],
+    notes: portableExerciseNotes(record, record.program)
   })], { type: 'application/json' });
+}
+
+function portableExerciseNotes(record, program) {
+  const notes = cleanExerciseNotes(record.notes, program);
+  const stamps = noteTimes(record.noteUpdatedAt, notes);
+  return Object.entries(notes).map(([key, text]) => {
+    const [day, position] = key.split('-').map(Number);
+    const slot = program.days[day][position];
+    const ids = [slot, ...slot.variants].flatMap(move => [move.id, ...(move.previousIds || [])]);
+    return { day, slotIds: [...new Set(ids)], text, updatedAt: stamps[key] };
+  });
 }
 
 function legacyGarminBackup(document, fail) {
@@ -369,15 +405,16 @@ function legacyGarminBackup(document, fail) {
   }) };
   const rows = cleanGarminRows(document.snapshot.imported, program, fail);
   return { format: garminBackupFormat, version: 1, programId: source.id,
-    workouts: portableGarminWorkouts(rows, program), deleted: document.snapshot.garminDeleted };
+    workouts: portableGarminWorkouts(rows, program), deleted: document.snapshot.garminDeleted,
+    notes: portableExerciseNotes(document.snapshot, program) };
 }
 
 function unpackGarminBackup(document, program) {
-  const fail = () => { throw new Error('Выберите JSON с резервной копией записей Garmin.'); };
+  const fail = () => { throw new Error('Выберите JSON с резервной копией тренировок и заметок.'); };
   if (document?.format === backupFormat && document.version === 1) document = legacyGarminBackup(document, fail);
   if (!isObject(document) || document.format !== garminBackupFormat || document.version !== 1 ||
       !Array.isArray(document.workouts)) fail();
-  if (document.programId !== program.id) throw new Error('Этот файл Garmin относится к другой программе.');
+  if (document.programId !== program.id) throw new Error('Эта резервная копия относится к другой программе.');
   const movementIndexes = program.days.map(day => new Map(day.flatMap((slot, position) =>
     [slot, ...slot.variants].flatMap((move, variant) =>
       [move.id, ...(move.previousIds || [])].map(id => [id, { position, variant }])))));
@@ -404,5 +441,22 @@ function unpackGarminBackup(document, program) {
     });
     return { ...row, mapping, variants, performed };
   });
-  return { imported: cleanGarminRows(rows, program, fail), garminDeleted: cleanGarminDeleted(document.deleted ?? [], fail) };
+  const notes = {};
+  const noteUpdatedAt = {};
+  if (!Array.isArray(document.notes ?? [])) fail();
+  for (const note of document.notes ?? []) {
+    if (!isObject(note) || !Number.isInteger(note.day) || !movementIndexes[note.day] ||
+        !Array.isArray(note.slotIds) || !note.slotIds.length || note.slotIds.length > 121 ||
+        note.slotIds.some(id => typeof id !== 'string' || !/^[\w-]{1,60}$/.test(id)) ||
+        typeof note.text !== 'string' || note.text.length > exerciseNoteLimit ||
+        !Number.isSafeInteger(note.updatedAt) || note.updatedAt < 0) fail();
+    const target = note.slotIds.map(id => movementIndexes[note.day].get(id)).find(Boolean);
+    if (!target) throw new Error('В текущей версии программы нет упражнения из файла заметок.');
+    const key = `${note.day}-${target.position}`;
+    if (Object.hasOwn(notes, key) && noteUpdatedAt[key] > note.updatedAt) continue;
+    notes[key] = note.text;
+    noteUpdatedAt[key] = note.updatedAt;
+  }
+  return { imported: cleanGarminRows(rows, program, fail), garminDeleted: cleanGarminDeleted(document.deleted ?? [], fail),
+    notes, noteUpdatedAt };
 }
