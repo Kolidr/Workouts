@@ -331,8 +331,9 @@ function chooseDay() {
   return `<section class="page day-picker">
     <button type="button" class="text-button back" data-action="programs">${icon('chevron')} Программы</button>
     <h1>${escapeText(state.program.title)}</h1><p class="intro">${escapeText(state.program.author)}</p>
-    <a class="analytics-jump" href="#analytics-title">К аналитике</a>
-    <div class="day-cards" aria-label="Выберите день">${days.map((day, index) => `
+    <a class="day-jump" href="#program-days">К дням программы</a>
+    ${programAnalytics(state.program, state.imported)}
+    <div class="day-cards" id="program-days" aria-label="Выберите день">${days.map((day, index) => `
       <article class="day-choice">
         <button type="button" class="day-card" data-action="day" data-index="${index}">
           <span class="day-card-number">${index + 1}</span>
@@ -341,7 +342,6 @@ function chooseDay() {
         ${dayMuscles(index, day.map((_, position) => movementAt(index, position, selectedVariant(index, position))))}
       </article>`).join('')}
     </div>
-    ${programAnalytics(state.program, state.imported)}
   </section>`;
 }
 

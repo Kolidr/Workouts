@@ -15,14 +15,15 @@ function collectProgramAnalytics(program, workouts, weekCount) {
   const weeks = Array.from({ length: weekCount }, (_, index) => ({
     date: firstWeek + index * weekMilliseconds, count: 0
   }));
-  const volume = program.days.map(() => ({ warm: 0, work: 0, known: 0 }));
+  const latestByDay = new Map(workouts.map(workout => [workout.day, workout]));
+  const volume = program.days.map((_, day) => ({ date: latestByDay.get(day)?.date, warm: 0, work: 0, known: 0 }));
   const movements = new Map();
   const rests = { betweenSets: [], betweenExercises: [] };
 
   for (const workout of workouts) {
     const week = (analyticsWeek(workout.date) - firstWeek) / weekMilliseconds;
-    if (week < 0 || week >= weekCount) continue;
-    weeks[week].count++;
+    const inPeriod = week >= 0 && week < weekCount;
+    if (inPeriod) weeks[week].count++;
     const slots = program.days[workout.day];
     workout.sets.forEach((set, index) => {
       const kind = set.kind === 'warm' ? 'warm' : 'work';
@@ -30,21 +31,23 @@ function collectProgramAnalytics(program, workouts, weekCount) {
       const previous = workout.mapping[index - 1];
       const pause = workout.sets[index - 1]?.rest;
       const hasWeight = Number.isFinite(set.weight);
-      if (week === weekCount - 1 && hasWeight && Number.isFinite(set.reps)) {
+      if (latestByDay.get(workout.day) === workout && hasWeight && Number.isFinite(set.reps)) {
         volume[workout.day][kind] += set.weight * set.reps;
         volume[workout.day].known++;
       }
-      if (position >= 0 && previous >= 0 && Number.isFinite(pause)) {
+      if (inPeriod && position >= 0 && previous >= 0 && Number.isFinite(pause)) {
         rests[position === previous ? 'betweenSets' : 'betweenExercises'].push(pause);
       }
-      if (position < 0 || !hasWeight || !slots[position]) return;
+      if (!slots[position]) return;
       const movement = workout.performed?.[position] || describeMovement(slots[position], workout.variants?.[position]);
       if (!movements.has(movement.id)) movements.set(movement.id, { ...movement, sessions: new Map() });
       const sessions = movements.get(movement.id).sessions;
       if (!sessions.has(workout.id)) sessions.set(workout.id, { date: workout.date });
       const point = sessions.get(workout.id);
       const current = point[kind];
-      if (!current || set.weight > current.weight || (set.weight === current.weight && (set.reps ?? -1) > (current.reps ?? -1))) {
+      const weight = hasWeight ? set.weight : -Infinity;
+      const currentWeight = Number.isFinite(current?.weight) ? current.weight : -Infinity;
+      if (!current || weight > currentWeight || (weight === currentWeight && (set.reps ?? -1) > (current.reps ?? -1))) {
         point[kind] = set;
       }
     });
@@ -89,11 +92,11 @@ function weeklyActivity(weeks, planned) {
   </section>`;
 }
 
-function latestTrainingVolume(volume, week) {
+function latestTrainingVolume(volume) {
   const max = Math.max(1, ...volume.map(day => day.warm + day.work));
-  const bars = volume.map(({ warm, work, known }, index) => `
+  const bars = volume.map(({ date, warm, work, known }, index) => `
     <div class="analytics-bar-row">
-      <span>День ${index + 1}</span>
+      <span>День ${index + 1}${date ? `<time datetime="${date}">${displayDate(date)}</time>` : ''}</span>
       <svg viewBox="0 0 100 8" preserveAspectRatio="none" role="img"
         aria-label="${known ? `Разминка ${listWeight.format(warm)}, рабочие подходы ${listWeight.format(work)}` : 'Нет данных о нагрузке'}">
         <rect class="analytics-bar-track" width="100" height="8" rx="3"/>
@@ -103,7 +106,7 @@ function latestTrainingVolume(volume, week) {
       <strong>${known ? listWeight.format(warm + work) : '—'}</strong>
     </div>`).join('');
   return `<section class="analytics-card">
-    <div class="analytics-card-header"><h3>Объём нагрузки</h3><span>Неделя с ${shortAnalyticsDate.format(week.date)}</span></div>
+    <div class="analytics-card-header"><h3>Объём нагрузки</h3><span>Последняя тренировка каждого дня</span></div>
     <p class="analytics-caption">Вес × повторения, кг·повт.</p>
     <div class="analytics-bars">${bars}</div>
     ${analyticsLegend([['warm', 'Разминка'], ['work', 'Рабочие подходы']])}
@@ -112,6 +115,7 @@ function latestTrainingVolume(volume, week) {
 
 function exerciseTrend(points) {
   const values = points.flatMap(point => [point.warm?.weight, point.work?.weight].filter(Number.isFinite));
+  if (!values.length) return '<p class="analytics-caption">В этих тренировках вес не указан.</p>';
   const low = Math.min(...values);
   const high = Math.max(...values);
   const rawStep = Math.max(1, (high - low) / 3);
@@ -120,19 +124,25 @@ function exerciseTrend(points) {
   const floor = Math.floor(low / step) * step;
   const ticks = Array.from({ length: 5 }, (_, i) => floor + step * i);
   const y = weight => 111 - 88 * (weight - floor) / (4 * step);
-  const x = index => points.length === 1 ? 192 : 51 + 277 * index / (points.length - 1);
+  const wide = points.length > 10;
+  const width = Math.max(352, 66 + points.length * 29);
+  const x = index => points.length === 1 ? 192 : 51 + (width - 75) * index / (points.length - 1);
   const showDate = chartDateIndexes(points.length);
-  return `<svg class="analytics-chart" viewBox="0 0 352 141" role="img" aria-label="Максимальный вес по тренировкам, кг. Точные значения под графиком">
-    ${ticks.map(weight => `<path class="analytics-grid" d="M38 ${y(weight)}H344"/>
+  return `${wide ? '<p class="analytics-caption">Прокрутите график, чтобы увидеть все даты.</p>' : ''}
+    <div class="analytics-trend-scroll" ${wide ? 'tabindex="0" aria-label="График прогресса с горизонтальной прокруткой"' : ''}>
+    <svg class="${wide ? 'analytics-trend' : 'analytics-chart'}" ${wide ? `width="${width}"` : ''} viewBox="0 0 ${width} 141"
+      role="img" aria-label="Максимальный вес по тренировкам, кг. Точные значения под графиком">
+    ${ticks.map(weight => `<path class="analytics-grid" d="M38 ${y(weight)}H${width - 8}"/>
       <text class="analytics-axis" x="33" y="${y(weight) + 4}" text-anchor="end">${listWeight.format(weight)}</text>`).join('')}
     ${['warm', 'work'].map(kind => {
-      const known = points.flatMap((point, index) => point[kind] ? [[x(index), y(point[kind].weight)]] : []);
+      const known = points.flatMap((point, index) => Number.isFinite(point[kind]?.weight)
+        ? [[x(index), y(point[kind].weight)]] : []);
       return `<polyline class="analytics-series ${kind}" points="${known.map(pair => pair.join(',')).join(' ')}"/>
         ${known.map(([cx, cy]) => `<circle class="analytics-point ${kind}" cx="${cx}" cy="${cy}" r="3.4"/>`).join('')}`;
     }).join('')}
-    ${points.map((point, index) => showDate.has(index)
+    ${points.map((point, index) => (wide ? index % 2 === (points.length - 1) % 2 : showDate.has(index))
       ? `<text class="analytics-axis" x="${x(index)}" y="129" text-anchor="middle">${shortAnalyticsDate.format(Date.parse(point.date))}</text>` : '').join('')}
-  </svg>`;
+  </svg></div>`;
 }
 
 function movementProgress(movements) {
@@ -140,25 +150,26 @@ function movementProgress(movements) {
   const movement = movements.get(analyticsSelection.movement) ||
     options.reduce((best, move) => !best || move.sessions.size > best.sessions.size ? move : best, null);
   if (!movement) return `<section class="analytics-card"><h3>Прогресс в упражнении</h3><p class="analytics-caption">Для графика нужен хотя бы один подход с указанным весом.</p></section>`;
-  const sessions = [...movement.sessions.values()];
-  const points = sessions.slice(-12);
+  const points = [...movement.sessions.values()];
   const latest = points.at(-1);
   const selected = options.map(move =>
     `<option value="${escapeText(move.id)}" ${move === movement ? 'selected' : ''}>${escapeText(move.title)}${move.alternative ? ' · аналог' : ''}</option>`).join('');
   return `<section class="analytics-card">
     <h3>Прогресс в упражнении</h3>
     <label class="analytics-movement">Упражнение<select id="analytics-movement">${selected}</select></label>
-    <p class="analytics-caption">Максимальный вес за тренировку, кг${sessions.length > points.length ? ' · последние 12 тренировок' : ''}</p>
+    <p class="analytics-caption">Максимальный вес за тренировку, кг · вся история</p>
     <div class="analytics-latest" aria-label="Последняя тренировка">
       <span>Разминка <strong>${setResult(latest.warm)}</strong></span>
       <span>Рабочие <strong>${setResult(latest.work)}</strong></span>
     </div>
     ${exerciseTrend(points)}
     ${analyticsLegend([['warm', 'Разминка'], ['work', 'Рабочие подходы']])}
+    ${points.some(point => !Number.isFinite(point.warm?.weight) && !Number.isFinite(point.work?.weight))
+      ? '<p class="analytics-caption">Тренировки без указанного веса видны в таблице.</p>' : ''}
     <details class="analytics-values">
       <summary>Значения по датам</summary>
       <table><thead><tr><th scope="col">Дата</th><th scope="col">Разминка</th><th scope="col">Рабочие</th></tr></thead>
-      <tbody>${points.map(point => `<tr><th scope="row">${displayDate(point.date)}</th>
+      <tbody>${[...points].reverse().map(point => `<tr><th scope="row">${displayDate(point.date)}</th>
         <td>${setResult(point.warm)}</td><td>${setResult(point.work)}</td></tr>`).join('')}</tbody></table>
     </details>
   </section>`;
@@ -198,13 +209,13 @@ function programAnalytics(program, workouts) {
   return `<section class="program-analytics" aria-labelledby="analytics-title">
     <div class="analytics-header">
       <h2 id="analytics-title">Аналитика программы</h2>
-      <label>Период <select id="analytics-weeks">
+      <label>Активность и отдых <select id="analytics-weeks">
       ${[4, 8, 12].map(weeks => `<option value="${weeks}" ${weeks === analyticsSelection.weeks ? 'selected' : ''}>${weeks} ${weeks === 4 ? 'недели' : 'недель'}</option>`).join('')}
       </select></label>
     </div>
     <div class="analytics-grid-layout">
       ${weeklyActivity(weeks, program.days.length)}
-      ${latestTrainingVolume(volume, weeks.at(-1))}
+      ${latestTrainingVolume(volume)}
       ${movementProgress(movements)}
       ${recoveryAnalytics(rests)}
     </div>

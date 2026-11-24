@@ -306,8 +306,8 @@ h1 {
 .day-card-number { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #6c6970; border-radius: 50%; font-weight: 650; }
 .day-card small { display: block; margin-top: 1px; font-size: .82rem; color: var(--secondary); }
 .day-card svg { width: 14px; height: 14px; color: var(--secondary); }
-.analytics-jump { display: inline-block; margin-top: 7px; color: var(--secondary); font-size: .87rem; text-underline-offset: 3px; }
-.analytics-jump:hover { color: var(--text); }
+.day-jump { display: inline-block; margin-top: 7px; color: var(--secondary); font-size: .87rem; text-underline-offset: 3px; }
+.day-jump:hover { color: var(--text); }
 .program-analytics { width: min(100%, 1120px); margin-top: 26px; }
 .program-analytics > .button { margin-top: 10px; }
 .analytics-header, .analytics-card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -322,6 +322,8 @@ h1 {
 .analytics-metric { display: flex; align-items: baseline; gap: 7px; color: var(--secondary); font-size: .82rem; }
 .analytics-metric strong { color: var(--text); font-size: 1.8rem; font-variant-numeric: tabular-nums; }
 .analytics-chart { width: 100%; max-width: 550px; margin-inline: auto; }
+.analytics-trend-scroll { overflow-x: auto; }
+.analytics-trend { min-width: 100%; max-width: none; height: auto; }
 .analytics-axis { fill: var(--secondary); font-size: 9.5px; }
 .analytics-number { fill: var(--text); font-size: 10.5px; font-weight: 650; }
 .analytics-grid { stroke: var(--line); stroke-width: 1; }
@@ -342,6 +344,7 @@ h1 {
 .analytics-bars { display: grid; gap: 7px; margin: 10px 0; }
 .analytics-bar-row { display: grid; grid-template-columns: minmax(92px, .75fr) minmax(0, 1fr) minmax(37px, auto); align-items: center; gap: 7px; font-size: .8rem; }
 .analytics-bar-row > span { color: var(--secondary); }
+.analytics-bar-row time { display: block; font-size: .72rem; }
 .analytics-bar-row strong { text-align: end; font-variant-numeric: tabular-nums; }
 .analytics-bar-row svg { width: 100%; height: 7px; overflow: hidden; border-radius: 5px; }
 .analytics-movement { display: block; margin: 6px 0; color: var(--secondary); font-size: .8rem; }
