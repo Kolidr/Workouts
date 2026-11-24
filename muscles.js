@@ -66,10 +66,10 @@ function muscleFigure(item, rear) {
   </figure>`;
 }
 
-function muscles(item) {
+function muscles(item, headingId = 'muscles-heading') {
   const labels = groups => groups.map(group => muscleNames[group]).join(', ');
-  return `<section class="muscles" aria-labelledby="muscles-heading">
-    <h2 id="muscles-heading">Задействованные мышцы</h2>
+  return `<section class="muscles" aria-labelledby="${headingId}">
+    <h2 id="${headingId}">Задействованные мышцы</h2>
     <div class="muscles-content">
       <div class="muscles-figures">${muscleFigure(item, false)}${muscleFigure(item, true)}</div>
       <dl class="muscle-labels">
@@ -78,4 +78,10 @@ function muscles(item) {
       </dl>
     </div>
   </section>`;
+}
+
+function dayMuscles(day, exercises) {
+  const major = new Set(exercises.flatMap(item => item.major));
+  const minor = new Set(exercises.flatMap(item => item.minor).filter(group => !major.has(group)));
+  return muscles({ major: [...major], minor: [...minor] }, `day-muscles-${day}`);
 }

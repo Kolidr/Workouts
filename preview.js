@@ -4,12 +4,12 @@ const notice = document.querySelector('#notice');
 const state = {
   screen: 'programs', day: 0, exercise: 0, progress: {}, focus: {}, notes: {}, variants: {}, links: {},
   draft: null, imported: [], importError: '', fileRequest: 0, program: null, media: {}, revision: 0, updatedAt: 0,
-  pendingRestore: null, busy: false, techniqueJob: null
+  pendingRestore: null, pendingGarmin: null, garminDeleted: [], busy: false, techniqueJob: null
 };
 let days = [];
 let writes = Promise.resolve();
 const mediaUrls = new Map();
-const choosePackage = '<label class="button primary file-label">Загрузить файл<input type="file" id="workspace-file" accept=".json,application/json"></label>';
+const choosePackage = '<label class="button primary file-label" data-file-drop="workspace-file">Загрузить файл<input type="file" id="workspace-file" accept=".json,application/json"></label>';
 const iconParts = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.3"/><rect x="14" y="3" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/>',
@@ -82,8 +82,8 @@ function restTime(seconds) {
 }
 
 function workspaceRecord() {
-  const { program, notes, variants, imported, progress, focus, links, updatedAt } = state;
-  return { program, notes, variants, imported, progress, focus, links, updatedAt };
+  const { program, notes, variants, imported, garminDeleted, progress, focus, links, updatedAt } = state;
+  return { program, notes, variants, imported, garminDeleted, progress, focus, links, updatedAt };
 }
 
 function saveLocal() {
@@ -109,7 +109,7 @@ function applyWorkspace(record, media) {
   state.updatedAt = record.updatedAt || 0;
   for (const key of ['variants', 'progress', 'focus', 'links']) state[key] = record[key] || {};
   state.notes = cleanExerciseNotes(record.notes, record.program);
-  state.imported = record.imported || [];
+  Object.assign(state, mergeGarmin({ imported: record.imported || [], garminDeleted: record.garminDeleted }, { imported: [] }));
   state.draft = null;
   state.day = 0;
   state.exercise = 0;
@@ -163,11 +163,11 @@ function technique(item) {
 function recordedHistory() {
   const slot = days[state.day][state.exercise];
   const matches = workout => workout.day === state.day && workout.mapping.includes(state.exercise);
-  return state.imported.filter(matches).map(workout => ({
+  return state.imported.filter(matches).sort(compareGarmin).map(workout => ({
       date: workout.date,
       movement: workout.performed?.[state.exercise] || describeMovement(slot, workout.variants?.[state.exercise]),
       sets: withRestBefore(workout).filter((_, index) => workout.mapping[index] === state.exercise)
-    })).sort((first, second) => second.date.localeCompare(first.date));
+    }));
 }
 
 function movementLabel(move) {
@@ -225,7 +225,7 @@ function historyDialog(item) {
 function plan(item) {
   const warm = item.warm || 0;
   const { limit: count, active, statuses } = progressFor(item);
-  const history = recordedHistory()[0];
+  const history = recordedHistory().at(-1);
   const showMovement = history && (history.movement.alternative || history.movement.id !== item.id);
   const rowCount = Math.max(count, history?.sets.length || 0);
   const rows = Array.from({ length: rowCount }, (_, index) => {
@@ -233,9 +233,10 @@ function plan(item) {
     const recorded = history?.sets[index];
     const isActive = index === active && index < count;
     const status = statuses[index];
-    const rest = recorded?.rest;
+    const rest = recorded?.restBefore;
     const type = isWarm ? 'Разминка' : index >= setCount(item) ? 'Доп. подход' : 'Рабочий';
-    return `<div class="set-row ${isActive ? 'is-current' : ''}" ${isActive ? 'aria-current="step"' : ''}>
+    return `${rest == null ? '' : `<div class="rest-row"><span aria-label="Отдых перед подходом ${index + 1}, ${restTime(rest)}">Отдых ${restTime(rest)}</span></div>`}
+    <div class="set-row ${isActive ? 'is-current' : ''}" ${isActive ? 'aria-current="step"' : ''}>
       ${index < count ? `
       <button type="button" class="set-name set-picker ${status || ''}" data-action="${status ? 'undo-set' : 'select-set'}"
         data-index="${index}" aria-label="${status === 'done' ? 'Отменить выполнение подхода' : status === 'skipped' ? 'Вернуть пропущенный подход' : 'Выбрать подход'} ${index + 1}">
@@ -244,8 +245,7 @@ function plan(item) {
       </button>` : `<span class="set-name">${type}</span>`}
       <strong>${index >= count ? '—' : isWarm ? ['15–20', '10–12'][index] : escapeText(item.reps)}</strong>
       <span class="history-value">${setResult(recorded)}</span>
-    </div>${rest != null && index < rowCount - 1 ? `
-    <div class="rest-row"><span>Отдых ${restTime(rest)}</span></div>` : ''}`;
+    </div>`;
   }).join('');
   const next = active !== undefined ? 'mark' : 'next';
   return `<section class="plan" aria-labelledby="plan-title">
@@ -305,13 +305,13 @@ function workout() {
 
 function programs() {
   if (!state.program) {
-    return `<section class="page transfer"><h1>Локальное пространство</h1>
-      <p class="intro">Для первого запуска загрузите личный пакет или резервную копию.</p>
+    return `<section class="page transfer" data-file-drop="workspace-file"><h1>Локальное пространство</h1>
+      <p class="intro">Перетащите сюда файл программы или выберите его.</p>
       ${choosePackage}</section>`;
   }
   return `<section class="page programs">
     <div class="programs-header"><h1>Программы</h1>
-      <label class="button secondary file-label">${icon('plus')} Добавить программу
+      <label class="button secondary file-label" data-file-drop="workspace-file">${icon('plus')} Добавить программу
         <input type="file" id="workspace-file" accept=".json,application/json" aria-label="Добавить программу файлом JSON"></label>
     </div>
     <div class="cover">
@@ -329,48 +329,70 @@ function chooseDay() {
     <button type="button" class="text-button back" data-action="programs">${icon('chevron')} Программы</button>
     <h1>${escapeText(state.program.title)}</h1><p class="intro">${escapeText(state.program.author)}</p>
     <div class="day-cards" aria-label="Выберите день">${days.map((day, index) => `
-      <button type="button" class="day-card" data-action="day" data-index="${index}">
-        <span class="day-card-number">${index + 1}</span>
-        <span><strong>День ${index + 1}</strong><small>${day.length} упражнений</small></span>${icon('chevron')}
-      </button>`).join('')}
+      <article class="day-choice">
+        <button type="button" class="day-card" data-action="day" data-index="${index}">
+          <span class="day-card-number">${index + 1}</span>
+          <span><strong>День ${index + 1}</strong><small>${day.length} упражнений</small></span>${icon('chevron')}
+        </button>
+        ${dayMuscles(index, day.map((_, position) => movementAt(index, position, selectedVariant(index, position))))}
+      </article>`).join('')}
     </div>
   </section>`;
 }
 
-function dayOptions(selected) {
-  return `<option value="">Выберите день</option>${days.map((_, day) =>
+function dayOptions(selected, allowEmpty = true) {
+  return `${allowEmpty ? '<option value="">Выберите день</option>' : ''}${days.map((_, day) =>
     `<option value="${day}" ${selected === day ? 'selected' : ''}>День ${day + 1}</option>`
   ).join('')}`;
 }
 
 function garmin() {
   const draft = state.draft;
-  return `<section class="page transfer">
-    <h1>Импорт Garmin</h1>
-    <p class="intro">Загрузите FIT-файл целой тренировки.</p>
+  const editing = draft?.editing;
+  return `<section class="page transfer" ${editing ? '' : 'data-file-drop="fit-file"'}>
+    <h1>${editing ? 'Редактировать тренировку Garmin' : 'Импорт Garmin'}</h1>
+    ${editing ? '' : `<p class="intro">Перетащите FIT-файл тренировки или выберите его.</p>
     <div class="file-panel">
       <div class="file-icon">${icon('file')}</div>
       <div><strong>${draft ? escapeText(draft.filename) : 'Файл тренировки .FIT'}</strong>
       <p>${draft ? `<time datetime="${draft.date}">${displayDate(draft.date)}</time> · ${nameForSets(draft.sets.length)}` : 'Дата и подходы будут прочитаны из файла'}</p></div>
       <label class="button ${draft ? 'secondary' : 'primary'} file-label">${draft ? 'Заменить файл' : 'Выбрать файл'}
         <input id="fit-file" type="file" accept=".fit,application/octet-stream"></label>
-    </div>
+    </div>`}
     ${state.importError ? `<p class="error" role="alert">${escapeText(state.importError)}</p>` : ''}
     ${draft ? `
       <div class="import-fields">
-        <label for="fit-program">Программа
+        ${editing ? `<label for="fit-date">Дата тренировки
+          <input id="fit-date" type="date" value="${draft.date}" required>
+        </label>` : `<label for="fit-program">Программа
           <select id="fit-program"><option value="">Выберите программу</option>
             <option value="current" ${draft.program ? 'selected' : ''}>${escapeText(state.program.title)}</option></select>
-        </label>
+        </label>`}
         <label for="fit-day">День программы
-          <select id="fit-day" ${draft.program ? '' : 'disabled'}>${dayOptions(draft.day)}</select>
+          <select id="fit-day" ${draft.program ? '' : 'disabled'}>${dayOptions(draft.day, !editing)}</select>
         </label>
+        ${editing ? `<label for="fit-initial-rest">Отдых перед первым подходом, с
+          <input id="fit-initial-rest" type="number" min="0" step="any" value="${draft.initialRest ?? ''}">
+        </label>` : ''}
       </div>
       <div id="import-review">${draft.day === null ? '' : review(draft)}</div>
     ` : ''}
-    ${!draft && state.imported.length ? `<div class="import-receipt">
-      <h2>Последний импорт</h2><p>${displayDate(state.imported[0].date)} · ${escapeText(state.program.title)} · День ${state.imported[0].day + 1}</p>
-    </div>` : ''}
+    ${!draft && state.imported.length ? garminWorkouts() : ''}
+  </section>`;
+}
+
+function garminWorkouts() {
+  return `<section class="import-receipt">
+    <h2>Тренировки Garmin</h2>
+    <ul class="garmin-workouts">${state.imported.map(row => `
+      <li class="garmin-workout">
+        <div><time datetime="${row.date}">${displayDate(row.date)}</time>
+          <p>День ${row.day + 1} · ${nameForSets(row.sets.length)}</p></div>
+        <div class="garmin-actions">
+          ${button('Изменить', 'edit-garmin', 'secondary', `data-record="${escapeText(row.id)}"`)}
+          ${button('Удалить', 'delete-garmin', 'quiet', `data-record="${escapeText(row.id)}"`)}
+        </div>
+      </li>`).join('')}</ul>
   </section>`;
 }
 
@@ -453,20 +475,24 @@ function review(draft, expanded = new Set()) {
     <div class="review-header"><h2>Проверка подходов</h2><span>${assigned} из ${draft.sets.length} распределено</span></div>
     <p class="intro">Выберите выполненный вариант. Раскройте упражнение, чтобы изменить подходы, вес, повторения и отдых.</p>
     <div class="review-list">${rows}</div>
-    <div class="import-actions">${button('Подтвердить тренировку', 'confirm-fit', 'primary', draft.sets.length ? '' : 'disabled')}
-      ${button('Распределить заново', 'reset-fit', 'secondary')}</div>
+    <div class="import-actions">${button(draft.editing ? 'Сохранить изменения' : 'Подтвердить тренировку',
+      'confirm-fit', 'primary', draft.sets.length ? '' : 'disabled')}
+      ${button('Распределить заново', 'reset-fit', 'secondary')}
+      ${draft.editing ? button('Отмена', 'cancel-fit-edit', 'quiet') : ''}</div>
   </section>`;
 }
 
 function dataScreen() {
   return `<section class="page transfer">
     <h1>Данные</h1>
-    <p class="intro">Материалы и записи хранятся в браузере. Резервную копию можно перенести на другое устройство.</p>
-    ${state.program ? `<div class="data-panel"><div><h2>Выгрузить программу и записи</h2><p>Резервная копия с короткими роликами.</p></div>
-      ${button('Выгрузить', 'backup')}</div>` : ''}
-    <div class="data-panel"><div><h2>Восстановить данные</h2><p>Личный пакет или резервная копия.</p></div>
-      ${choosePackage}</div>
-    ${state.program ? `<div class="data-panel"><div><h2>Видео с полной техникой</h2>
+    <p class="intro">Переносите записи Garmin между устройствами с помощью JSON.</p>
+    ${state.program ? `<div class="data-panel"><div><h2>Выгрузить записи Garmin</h2><p>Скачайте резервную копию или перетащите кнопку выгрузки.</p></div>
+      ${button('Выгрузить', 'backup', 'secondary', 'draggable="true"')}</div>
+    <div class="data-panel" data-file-drop="garmin-backup-file"><div><h2>Восстановить записи Garmin</h2>
+      <p>Перетащите JSON сюда или выберите файл.</p></div>
+      <label class="button primary file-label">Выбрать файл<input type="file" id="garmin-backup-file" accept=".json,application/json"></label></div>`
+      : `<div class="data-panel"><p>Сначала загрузите файл программы.</p>${button('Открыть программы', 'programs')}</div>`}
+    ${state.program ? `<div class="data-panel" data-file-drop="technique-file"><div><h2>Видео с полной техникой</h2>
       <p id="technique-status" role="status">Проверяем локальное хранилище…</p></div>
       <label class="button secondary file-label technique-file-label">Загрузить видео с полной техникой
         <input id="technique-file" type="file" accept=".json,application/json" ${state.techniqueJob ? 'disabled' : ''}>
@@ -597,12 +623,7 @@ async function readPersonalFile(file) {
 }
 
 function mergeRecords(current, incoming) {
-  const imported = new Map(current.imported.map(record => [record.id, record]));
-  for (const record of incoming.imported) {
-    const known = imported.get(record.id);
-    if (!known || (known.updatedAt || 0) <= (record.updatedAt || 0)) imported.set(record.id, record);
-  }
-  const merged = { ...current, imported: [...imported.values()].sort((a, b) => b.date.localeCompare(a.date)) };
+  const merged = { ...current, ...mergeGarmin(current, incoming) };
   const later = incoming.updatedAt >= current.updatedAt ? incoming : current;
   for (const key of ['notes', 'variants', 'links']) merged[key] = { ...current[key], ...incoming[key], ...later[key] };
   merged.progress = later.progress;
@@ -616,7 +637,7 @@ async function restoreWorkspace(merge) {
   state.busy = true;
   try {
     await writes;
-    const blank = { notes: {}, links: {}, variants: {}, progress: {}, focus: {}, imported: [], updatedAt: 0 };
+    const blank = { notes: {}, links: {}, variants: {}, progress: {}, focus: {}, imported: [], garminDeleted: [], updatedAt: 0 };
     const incoming = pending.snapshot || blank;
     const keepProgram = merge && (state.program.edition || 1) > pending.program.edition;
     const program = keepProgram ? state.program : pending.program;
@@ -638,27 +659,69 @@ async function restoreWorkspace(merge) {
   }
 }
 
-async function exportWorkspace() {
+function garminArchive() {
+  const blob = garminBackupDocument(workspaceRecord());
+  const filename = `garmin-${new Intl.DateTimeFormat('sv-SE').format(new Date())}.json`;
+  return new File([blob], filename, { type: blob.type });
+}
+
+async function exportGarmin() {
   if (!state.program || state.busy) return;
-  state.busy = true;
   try {
     await writes;
-    const stored = await readWorkspace();
-    if (!stored.record) throw new Error('Нет сохранённых данных для выгрузки.');
-    const blob = await backupDocument(stored.record, stored.media);
-    const url = URL.createObjectURL(blob);
+    const file = garminArchive();
+    const url = URL.createObjectURL(file);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `local-panel-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = file.name;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (error) {
     announce(error.message);
+  }
+}
+
+async function readGarminBackup(file) {
+  if (state.busy || !state.program) return;
+  state.busy = true;
+  const program = state.program;
+  try {
+    if (file.size > 160 * 1024 * 1024) throw new Error('Выберите резервную копию Garmin размером до 160 МБ.');
+    const records = unpackGarminBackup(JSON.parse(await file.text()), program);
+    if (state.screen !== 'data' || state.program !== program) return;
+    state.pendingGarmin = records;
+    openDialog('Восстановить записи Garmin?', `<p class="intro">Тренировок в файле: ${records.imported.length}.
+      Отметок об удалении: ${records.garminDeleted.length}.</p>
+      ${button('Восстановить записи', 'confirm-garmin-restore', 'primary')}`);
+  } catch (error) {
+    announce(error instanceof SyntaxError ? 'Файл не удалось прочитать как JSON.' : error.message);
   } finally {
     state.busy = false;
   }
+}
+
+async function commitGarmin(incoming) {
+  if (state.busy) return false;
+  state.busy = true;
+  const before = { imported: state.imported, garminDeleted: state.garminDeleted };
+  Object.assign(state, mergeGarmin(before, incoming));
+  try {
+    await saveLocal();
+    return true;
+  } catch {
+    Object.assign(state, before);
+    return false;
+  } finally {
+    state.busy = false;
+  }
+}
+
+function garminChangeTime(id) {
+  const recorded = state.imported.find(row => row.id === id);
+  const deleted = state.garminDeleted.find(row => row.id === id);
+  return Math.max(Date.now(), (recorded?.updatedAt || 0) + 1, (deleted?.updatedAt || 0) + 1);
 }
 
 async function refreshTechniqueStatus() {
@@ -765,7 +828,7 @@ async function fullTechnique(item) {
   openDialog('Полная техника', `<p class="intro">${escapeText(item.title)}</p>
     <div id="full-video-library">Ищем загруженные видео…</div>
     <div id="full-video-slot"></div>
-    <details class="other-video"><summary>Открыть другое видео</summary>
+    <details class="other-video" data-file-drop="full-video-file"><summary>Открыть другое видео</summary>
       ${link ? `<p><a href="${escapeText(link)}" target="_blank" rel="noopener noreferrer">Открыть сохранённую ссылку</a></p>` : ''}
       <label class="button secondary file-label">Открыть видео с устройства
         <input id="full-video-file" type="file" accept="video/*,.mov,.mp4"></label>
@@ -889,6 +952,35 @@ document.addEventListener('click', async event => {
       announce('Тренировка завершена.');
       break;
     }
+    case 'edit-garmin': {
+      if (state.busy) return;
+      const workout = state.imported.find(row => row.id === control.dataset.record);
+      if (!workout) return;
+      state.fileRequest++;
+      state.importError = '';
+      state.draft = { ...structuredClone(workout), program: 'current', editing: true };
+      break;
+    }
+    case 'cancel-fit-edit':
+      state.draft = null;
+      break;
+    case 'delete-garmin': {
+      const workout = state.imported.find(row => row.id === control.dataset.record);
+      if (!workout) return;
+      openDialog('Удалить тренировку Garmin?', `<p class="intro">${displayDate(workout.date)} · День ${workout.day + 1}</p>
+        ${button('Удалить тренировку', 'confirm-garmin-delete', 'primary', `data-record="${escapeText(workout.id)}"`)}`);
+      return;
+    }
+    case 'confirm-garmin-delete': {
+      const id = control.dataset.record;
+      if (!state.imported.some(row => row.id === id)) return;
+      if (await commitGarmin({ imported: [], garminDeleted: [{ id, updatedAt: garminChangeTime(id) }] })) {
+        dialog.close();
+        announce('Тренировка удалена из истории.');
+        break;
+      }
+      return;
+    }
     case 'reset-fit':
       if (!validateSetFields()) return;
       autoMap(state.draft);
@@ -916,30 +1008,38 @@ document.addEventListener('click', async event => {
     }
     case 'confirm-fit': {
       if (state.busy || !validateSetFields()) return;
-      state.busy = true;
-      control.disabled = true;
       const workout = state.draft;
-      const prior = state.imported;
-      const { id, date, day, mapping, variants, initialRest } = workout;
+      const dateField = document.querySelector('#fit-date');
+      const initialRestField = document.querySelector('#fit-initial-rest');
+      if ((dateField && !dateField.reportValidity()) || (initialRestField && !initialRestField.reportValidity())) return;
+      const { id, day, mapping, variants } = workout;
+      const date = dateField?.value ?? workout.date;
+      if (!validGarminDate(date)) return;
+      const initialRest = initialRestField ? (initialRestField.value ? initialRestField.valueAsNumber : null) : workout.initialRest;
       const sets = workout.sets.map((set, position) => ({ ...set, kind: fitSetKind(workout, position) }));
-      const performed = days[day].map((slot, index) => describeMovement(slot, variants[index]));
-      state.imported = [{ id, date, day, mapping, variants, performed, sets, initialRest, updatedAt: Date.now() },
-        ...prior.filter(existing => existing.id !== id)];
-      try {
-        await saveLocal();
+      const previous = workout.editing && state.imported.find(row => row.id === id && row.day === day);
+      const performed = days[day].map((slot, index) =>
+        (previous?.variants?.[index] === variants[index] && previous?.performed?.[index]) || describeMovement(slot, variants[index]));
+      const row = { id, date, day, mapping, variants, performed, sets, initialRest, startedAt: garminStart(workout),
+        updatedAt: garminChangeTime(id) };
+      control.disabled = true;
+      if (await commitGarmin({ imported: [row] })) {
         state.draft = null;
         state.importError = '';
-        announce(`Тренировка за ${displayDate(date)} добавлена в историю.`);
-      } catch {
-        state.imported = prior;
-      } finally {
-        state.busy = false;
-        control.disabled = false;
+        announce(workout.editing ? 'Тренировка обновлена в истории.' : `Тренировка за ${displayDate(date)} добавлена в историю.`);
       }
+      control.disabled = false;
       break;
     }
     case 'backup':
-      await exportWorkspace();
+      await exportGarmin();
+      return;
+    case 'confirm-garmin-restore':
+      if (state.pendingGarmin && await commitGarmin(state.pendingGarmin)) {
+        state.pendingGarmin = null;
+        dialog.close();
+        announce('Записи Garmin синхронизированы.');
+      }
       return;
     case 'confirm-restore': case 'confirm-merge':
       await restoreWorkspace(action === 'confirm-merge');
@@ -950,24 +1050,15 @@ document.addEventListener('click', async event => {
   render();
 });
 
-app.addEventListener('change', async event => {
-  const target = event.target;
-  if (target.id === 'workspace-file') {
-    const file = target.files[0];
-    target.value = '';
-    if (file) await readPersonalFile(file);
-  } else if (target.id === 'technique-file') {
-    const file = target.files[0];
-    target.value = '';
-    if (file) await loadTechniqueFile(file);
-  } else if (target.id === 'movement-variant') {
-    state.variants[slotKey(state.day, state.exercise)] = Number(target.value);
-    saveLocal();
-    render(false);
-    document.querySelector('#movement-variant').focus();
-  } else if (target.id === 'fit-file') {
-    const file = target.files[0];
-    if (!file) return;
+async function receiveFile(id, file) {
+  if (id === 'workspace-file') await readPersonalFile(file);
+  else if (id === 'garmin-backup-file') await readGarminBackup(file);
+  else if (id === 'technique-file') await loadTechniqueFile(file);
+  else if (id === 'full-video-file') {
+    fullVideoRequest++;
+    for (const choice of dialog.querySelectorAll('[data-action="choose-full-video"]')) choice.setAttribute('aria-pressed', 'false');
+    mountFullVideo(dialog.querySelector('#full-video-slot'), file);
+  } else if (id === 'fit-file' && !state.busy && !state.draft?.editing) {
     const request = ++state.fileRequest;
     try {
       if (file.size > 32 * 1024 * 1024) throw new Error('Выберите FIT-файл размером до 32 МБ.');
@@ -978,6 +1069,72 @@ app.addEventListener('change', async event => {
       state.importError = error.message;
       render(false);
     }
+  }
+}
+
+let activeFileDrop;
+function highlightFileDrop(zone) {
+  if (activeFileDrop === zone) return;
+  activeFileDrop?.classList.remove('file-drop-active');
+  activeFileDrop = zone;
+  activeFileDrop?.classList.add('file-drop-active');
+}
+
+document.addEventListener('dragover', event => {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault();
+  const zone = event.target.closest('[data-file-drop]');
+  event.dataTransfer.dropEffect = zone ? 'copy' : 'none';
+  highlightFileDrop(zone);
+});
+
+document.addEventListener('dragleave', event => {
+  if (activeFileDrop?.contains(event.target) && !activeFileDrop.contains(event.relatedTarget)) highlightFileDrop(null);
+});
+
+document.addEventListener('drop', event => {
+  highlightFileDrop(null);
+  const files = event.dataTransfer?.files;
+  if (!files?.length) return;
+  event.preventDefault();
+  const zone = event.target.closest('[data-file-drop]');
+  if (zone && files.length === 1) receiveFile(zone.dataset.fileDrop, files[0]);
+  else if (zone) announce('Перетащите один файл за раз.');
+});
+
+document.addEventListener('dragstart', event => {
+  if (!event.target.closest('[data-action="backup"]')) return;
+  if (!state.program || state.busy) {
+    event.preventDefault();
+    return;
+  }
+  const file = garminArchive();
+  const url = URL.createObjectURL(file);
+  event.dataTransfer.effectAllowed = 'copy';
+  event.dataTransfer.items.add(file);
+  event.dataTransfer.setData('DownloadURL', `${file.type}:${file.name}:${url}`);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+});
+
+document.addEventListener('change', event => {
+  const input = event.target;
+  if (input.type !== 'file' || !input.closest('#app, #dialog')) return;
+  const file = input.files[0];
+  input.value = '';
+  if (file) receiveFile(input.id, file);
+});
+
+app.addEventListener('change', async event => {
+  const target = event.target;
+  if (target.id === 'movement-variant') {
+    state.variants[slotKey(state.day, state.exercise)] = Number(target.value);
+    saveLocal();
+    render(false);
+    document.querySelector('#movement-variant').focus();
+  } else if (target.id === 'fit-date') {
+    if (validGarminDate(target.value)) state.draft.date = target.value;
+  } else if (target.id === 'fit-initial-rest') {
+    if (target.validity.valid) state.draft.initialRest = target.value ? target.valueAsNumber : null;
   } else if (target.id === 'fit-program') {
     state.draft.program = target.value;
     state.draft.day = null;
@@ -1021,13 +1178,6 @@ app.addEventListener('change', async event => {
     refreshReview(expanded);
     document.querySelector(`[data-set-index="${position}"]`).focus();
   }
-});
-
-dialog.addEventListener('change', event => {
-  if (event.target.id !== 'full-video-file' || !event.target.files.length) return;
-  fullVideoRequest++;
-  for (const choice of dialog.querySelectorAll('[data-action="choose-full-video"]')) choice.setAttribute('aria-pressed', 'false');
-  mountFullVideo(dialog.querySelector('#full-video-slot'), event.target.files[0]);
 });
 
 dialog.addEventListener('close', () => {

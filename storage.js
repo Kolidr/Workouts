@@ -1,5 +1,6 @@
 const packageFormat = 'local-panel-program';
 const backupFormat = 'local-panel-backup';
+const garminBackupFormat = 'local-panel-garmin';
 const contentTypes = { video: 'video/mp4', jpeg: 'image/jpeg', png: 'image/png' };
 let openedDatabase;
 
@@ -159,17 +160,29 @@ function unpackDocument(document) {
   return { program, media, snapshot };
 }
 
-function cleanSnapshot(raw, program, knownIds, fail) {
-  if (!isObject(raw) || !Array.isArray(raw.imported)) fail();
-  const stringEntries = value => Object.fromEntries(Object.entries(isObject(value) ? value : {}).filter(
-    ([key, text]) => /^[a-zA-Z0-9_-]+$/.test(key) && typeof text === 'string' && text.length <= 2048
-  ));
+function validGarminDate(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const value = new Date(`${date}T00:00:00Z`);
+  return Number.isFinite(value.getTime()) && value.toISOString().slice(0, 10) === date;
+}
+
+function garminStart(row) {
+  return row.startedAt ?? Number(/^(\d+):\d+:\d+$/.exec(row.id)?.[1] || 0);
+}
+
+function compareGarmin(first, second) {
+  return first.date.localeCompare(second.date) || garminStart(first) - garminStart(second) || first.id.localeCompare(second.id);
+}
+
+function cleanGarminRows(rows, program, fail) {
+  if (!Array.isArray(rows)) fail();
   const number = value => value === null || value === undefined ? null :
     typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fail();
-  const imported = raw.imported.map(row => {
-    const day = program.days[row?.day];
-    if (!day || typeof row.id !== 'string' || row.id.length > 150 || !/^\d{4}-\d{2}-\d{2}$/.test(row.date) ||
-        !Array.isArray(row.mapping) || !Array.isArray(row.sets) || row.mapping.length !== row.sets.length ||
+  return rows.map(row => {
+    if (!isObject(row)) fail();
+    const day = program.days[row.day];
+    if (!day || !Number.isInteger(row.day) || typeof row.id !== 'string' || !row.id || row.id.length > 150 ||
+        !validGarminDate(row.date) || !Array.isArray(row.mapping) || !Array.isArray(row.sets) || row.mapping.length !== row.sets.length ||
         row.mapping.some(index => !Number.isInteger(index) || index < -1 || index >= day.length)) fail();
     const variants = day.map((item, index) => {
       const variant = row.variants?.[index] || 0;
@@ -184,12 +197,46 @@ function cleanSnapshot(raw, program, knownIds, fail) {
       return describeMovement(item, variants[index]);
     });
     return {
-      id: row.id, date: row.date, day: row.day, updatedAt: number(row.updatedAt) ?? 0, variants, performed, mapping: row.mapping,
-      initialRest: number(row.initialRest), sets: row.sets.map(set => ({
-        weight: number(set.weight), reps: number(set.reps), rest: number(set.rest), kind: set.kind === 'warm' ? 'warm' : 'work'
-      }))
+      id: row.id, date: row.date, day: row.day, startedAt: number(row.startedAt), updatedAt: number(row.updatedAt) ?? 0,
+      variants, performed, mapping: row.mapping, initialRest: number(row.initialRest), sets: row.sets.map(set => {
+        if (!isObject(set)) fail();
+        return { weight: number(set.weight), reps: number(set.reps), rest: number(set.rest), kind: set.kind === 'warm' ? 'warm' : 'work' };
+      })
     };
   });
+}
+
+function cleanGarminDeleted(deleted, fail) {
+  if (!Array.isArray(deleted)) fail();
+  return deleted.map(row => {
+    if (!isObject(row) || typeof row.id !== 'string' || !row.id || row.id.length > 150 ||
+        !Number.isFinite(row.updatedAt) || row.updatedAt < 0) fail();
+    return { id: row.id, updatedAt: row.updatedAt };
+  });
+}
+
+function mergeGarmin(current, incoming) {
+  const latest = rows => {
+    const byId = new Map();
+    for (const row of rows) {
+      const known = byId.get(row.id);
+      if ((known?.updatedAt || 0) <= (row.updatedAt || 0)) byId.set(row.id, row);
+    }
+    return byId;
+  };
+  const deleted = latest([...(current.garminDeleted || []), ...(incoming.garminDeleted || [])]);
+  const imported = [...latest([...current.imported, ...incoming.imported]).values()]
+    .filter(row => !deleted.has(row.id) || ((row.updatedAt || 0) > deleted.get(row.id).updatedAt)).sort(compareGarmin);
+  return { imported, garminDeleted: [...deleted.values()] };
+}
+
+function cleanSnapshot(raw, program, knownIds, fail) {
+  if (!isObject(raw) || !Array.isArray(raw.imported)) fail();
+  const stringEntries = value => Object.fromEntries(Object.entries(isObject(value) ? value : {}).filter(
+    ([key, text]) => /^[a-zA-Z0-9_-]+$/.test(key) && typeof text === 'string' && text.length <= 2048
+  ));
+  const imported = cleanGarminRows(raw.imported, program, fail);
+  const garminDeleted = cleanGarminDeleted(raw.garminDeleted ?? [], fail);
   const variantChoices = {};
   const progress = {};
   const focus = {};
@@ -209,8 +256,8 @@ function cleanSnapshot(raw, program, knownIds, fail) {
     }
   }));
   const links = Object.fromEntries(Object.entries(stringEntries(raw.links)).filter(([id, url]) => knownIds.has(id) && cleanLink(url)));
-  return { imported, variants: variantChoices, progress, focus, notes: cleanExerciseNotes(raw.notes, program),
-    links, updatedAt: number(raw.updatedAt) ?? 0 };
+  return { ...mergeGarmin({ imported, garminDeleted }, { imported: [] }), variants: variantChoices, progress, focus,
+    notes: cleanExerciseNotes(raw.notes, program), links, updatedAt: Number.isFinite(raw.updatedAt) && raw.updatedAt >= 0 ? raw.updatedAt : 0 };
 }
 
 function alignProgramRecord(record, source, target) {
@@ -286,22 +333,76 @@ function alignProgramRecord(record, source, target) {
   };
 }
 
-function encodeMedia(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',', 2)[1]);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
+function portableGarminWorkouts(rows, program) {
+  return rows.map(row => {
+    const { id, date, day, updatedAt, initialRest, sets, mapping } = row;
+    const exercises = [...new Set(mapping)].filter(position => position >= 0).map(position => {
+      const slot = program.days[day][position];
+      const movement = row.performed?.[position] || describeMovement(slot, row.variants?.[position]);
+      return { position, slotId: slot.id, movement };
+    });
+    return { id, date, day, updatedAt, startedAt: garminStart(row), initialRest, sets, mapping, exercises };
   });
 }
 
-async function backupDocument(record, blobs) {
-  const names = Object.fromEntries(Object.entries(contentTypes).map(([name, mime]) => [mime, name]));
-  const media = Object.create(null);
-  for (const [name, blob] of Object.entries(blobs)) {
-    media[name] = { type: names[blob.type], data: await encodeMedia(blob) };
-  }
-  const { program, revision, ...snapshot } = record;
-  return new Blob([JSON.stringify({ format: backupFormat, version: 1, program, media, snapshot })],
-    { type: 'application/json' });
+function garminBackupDocument(record) {
+  return new Blob([JSON.stringify({
+    format: garminBackupFormat, version: 1, programId: record.program.id,
+    workouts: portableGarminWorkouts(record.imported, record.program), deleted: record.garminDeleted || []
+  })], { type: 'application/json' });
+}
+
+function legacyGarminBackup(document, fail) {
+  const source = document.program;
+  if (!isObject(source) || !Array.isArray(source.days) || !isObject(document.snapshot)) fail();
+  const identity = move => {
+    if (!isObject(move) || typeof move.id !== 'string' || typeof move.title !== 'string') fail();
+    return { id: move.id, title: move.title };
+  };
+  const program = { days: source.days.map(day => {
+    if (!Array.isArray(day)) fail();
+    return day.map(slot => {
+      const base = identity(slot);
+      if (!Array.isArray(slot.variants)) fail();
+      return { ...base, variants: slot.variants.map(identity) };
+    });
+  }) };
+  const rows = cleanGarminRows(document.snapshot.imported, program, fail);
+  return { format: garminBackupFormat, version: 1, programId: source.id,
+    workouts: portableGarminWorkouts(rows, program), deleted: document.snapshot.garminDeleted };
+}
+
+function unpackGarminBackup(document, program) {
+  const fail = () => { throw new Error('Выберите JSON с резервной копией записей Garmin.'); };
+  if (document?.format === backupFormat && document.version === 1) document = legacyGarminBackup(document, fail);
+  if (!isObject(document) || document.format !== garminBackupFormat || document.version !== 1 ||
+      !Array.isArray(document.workouts)) fail();
+  if (document.programId !== program.id) throw new Error('Этот файл Garmin относится к другой программе.');
+  const movementIndexes = program.days.map(day => new Map(day.flatMap((slot, position) =>
+    [slot, ...slot.variants].flatMap((move, variant) =>
+      [move.id, ...(move.previousIds || [])].map(id => [id, { position, variant }])))));
+  const rows = document.workouts.map(row => {
+    if (!isObject(row) || !Number.isInteger(row.day) || !movementIndexes[row.day] ||
+        !Array.isArray(row.exercises) || !Array.isArray(row.mapping)) fail();
+    const movements = movementIndexes[row.day];
+    const positions = new Map();
+    const variants = [];
+    const performed = [];
+    for (const entry of row.exercises) {
+      if (!isObject(entry) || !Number.isInteger(entry.position) || entry.position < 0 || positions.has(entry.position) ||
+          typeof entry.slotId !== 'string' || !isObject(entry.movement) || typeof entry.movement.id !== 'string') fail();
+      const target = movements.get(entry.movement.id) || movements.get(entry.slotId);
+      if (!target) throw new Error('В текущей версии программы нет упражнения из файла Garmin.');
+      positions.set(entry.position, target.position);
+      variants[target.position] = target.variant;
+      performed[target.position] = entry.movement;
+    }
+    const mapping = row.mapping.map(position => {
+      if (position === -1) return -1;
+      if (!positions.has(position)) fail();
+      return positions.get(position);
+    });
+    return { ...row, mapping, variants, performed };
+  });
+  return { imported: cleanGarminRows(rows, program, fail), garminDeleted: cleanGarminDeleted(document.deleted ?? [], fail) };
 }

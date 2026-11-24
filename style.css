@@ -286,9 +286,11 @@ h1 {
 .cover .button { margin-top: 17px; }
 .back { display: inline-flex; align-items: center; gap: 5px; color: var(--secondary); margin-bottom: 9px; }
 .back svg { width: 16px; height: 16px; }
-.day-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; width: min(100%, 780px); margin-top: 20px; }
+.day-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 11px; width: min(100%, 1120px); margin-top: 20px; }
+.day-choice { min-width: 0; }
 .day-card {
   display: grid;
+  width: 100%;
   grid-template-columns: 40px 1fr 14px;
   gap: 9px;
   align-items: center;
@@ -313,12 +315,14 @@ h1 {
 .file-label { position: relative; color: inherit; white-space: nowrap; margin-left: auto; }
 .file-label.primary { color: #17171a; }
 .file-label input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.file-drop-active { outline: 2px dashed var(--red); outline-offset: 3px; }
+[data-action="backup"][draggable="true"] { cursor: grab; }
 .demo-button { margin-top: 11px; color: var(--secondary); min-height: 40px; text-decoration: underline; text-underline-offset: 4px; font-size: .88rem; }
 .error { color: var(--red); margin-top: 10px; }
 .import-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
-.import-fields label { font-size: .88rem; font-weight: 620; }
-.import-fields select { margin-top: 5px; }
-select, textarea {
+.import-fields label { min-width: 0; font-size: .88rem; font-weight: 620; }
+.import-fields :is(select, input) { margin-top: 5px; }
+select, textarea, .import-fields input {
   width: 100%;
   min-height: 42px;
   padding: 9px 10px;
@@ -387,6 +391,10 @@ select {
 .import-receipt { border-top: 1px solid var(--line); padding-block: 15px; margin-top: 15px; }
 .import-receipt h2, .data-panel h2 { font-size: 1.07rem; }
 .import-receipt p { color: var(--secondary); margin-top: 5px; }
+.garmin-workouts { list-style: none; padding: 0; margin: 10px 0 0; }
+.garmin-workout { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--line); padding: 10px 0; }
+.garmin-workout time { font-weight: 650; }
+.garmin-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .data-panel { justify-content: space-between; margin-top: 10px; }
 
 dialog {
@@ -565,8 +573,8 @@ dialog::backdrop { background: #050507c2; }
   .cover img { object-position: center 51%; }
   .cover-copy { padding: 16px 18px 20px; }
   .day-cards { grid-template-columns: 1fr; }
-  .file-panel { flex-wrap: wrap; gap: 9px; padding: 11px; }
-  .file-panel > div:nth-child(2) { flex: 1; }
+  .file-panel { display: grid; grid-template-columns: 37px minmax(0, 1fr); gap: 9px; padding: 11px; }
+  .file-panel .file-label { grid-column: 2; justify-self: start; margin-left: 0; }
   .file-label { margin-left: 46px; }
   .data-panel { display: grid; justify-items: start; }
   .data-panel .file-label { margin-left: 0; max-width: 100%; }
