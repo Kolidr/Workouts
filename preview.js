@@ -382,9 +382,10 @@ function garmin() {
 }
 
 function garminWorkouts() {
+  const newestFirst = [...state.imported].sort((first, second) => compareGarmin(second, first));
   return `<section class="import-receipt">
     <h2>Тренировки Garmin</h2>
-    <ul class="garmin-workouts">${state.imported.map(row => `
+    <ul class="garmin-workouts">${newestFirst.map(row => `
       <li class="garmin-workout">
         <div><time datetime="${row.date}">${displayDate(row.date)}</time>
           <p>День ${row.day + 1} · ${nameForSets(row.sets.length)}</p></div>
