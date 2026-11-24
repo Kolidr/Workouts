@@ -63,6 +63,15 @@ function cleanLink(value) {
   return '';
 }
 
+function movementChoice(slot, variant = 0) {
+  return slot.variants[variant - 1] || slot;
+}
+
+function describeMovement(slot, variant = 0) {
+  const move = movementChoice(slot, variant);
+  return { id: move.id, title: move.title, alternative: move !== slot };
+}
+
 function unpackDocument(document) {
   const fail = () => { throw new Error('Файл не соответствует формату приложения.'); };
   const string = (value, max) => typeof value === 'string' && value.length <= max ? value : fail();
@@ -91,6 +100,10 @@ function unpackDocument(document) {
     if (knownIds.has(id)) fail();
     knownIds.add(id);
     const movement = { id, title: string(move.title, 150), source: cleanLink(move.source) };
+    if (move.previousIds !== undefined) {
+      if (!Array.isArray(move.previousIds) || move.previousIds.length > 10) fail();
+      movement.previousIds = [...new Set(move.previousIds.map(key))];
+    }
     for (const field of ['major', 'minor']) {
       if (!Array.isArray(move[field]) || move[field].some(region => !Object.hasOwn(muscleNames, region))) fail();
       movement[field] = [...new Set(move[field])];
@@ -116,6 +129,7 @@ function unpackDocument(document) {
   if (!Array.isArray(raw.days) || !raw.days.length || raw.days.length > 40) fail();
   const program = {
     id: key(raw.id), brand: string(raw.brand, 60), title: string(raw.title, 150), author: string(raw.author, 120),
+    edition: Number.isInteger(raw.edition) && raw.edition > 0 ? raw.edition : 1,
     cover: mediaId(raw.cover, 'image/'), banner: mediaId(raw.banner, 'image/'),
     days: raw.days.map(day => {
       if (!Array.isArray(day) || !day.length || day.length > 40) fail();
@@ -142,8 +156,16 @@ function cleanSnapshot(raw, program, knownIds, fail) {
       const variant = row.variants?.[index] || 0;
       return Number.isInteger(variant) && variant >= 0 && variant <= item.variants.length ? variant : 0;
     });
+    const performed = day.map((item, index) => {
+      const move = row.performed?.[index];
+      if (isObject(move) && typeof move.id === 'string' && /^[a-zA-Z0-9_-]{1,60}$/.test(move.id) &&
+          typeof move.title === 'string' && move.title.length <= 150) {
+        return { id: move.id, title: move.title, alternative: Boolean(move.alternative) };
+      }
+      return describeMovement(item, variants[index]);
+    });
     return {
-      id: row.id, date: row.date, day: row.day, updatedAt: number(row.updatedAt) ?? 0, variants, mapping: row.mapping,
+      id: row.id, date: row.date, day: row.day, updatedAt: number(row.updatedAt) ?? 0, variants, performed, mapping: row.mapping,
       initialRest: number(row.initialRest), sets: row.sets.map(set => ({
         weight: number(set.weight), reps: number(set.reps), rest: number(set.rest), kind: set.kind === 'warm' ? 'warm' : 'work'
       }))
@@ -170,6 +192,71 @@ function cleanSnapshot(raw, program, knownIds, fail) {
   const links = Object.fromEntries(Object.entries(stringEntries(raw.links)).filter(([id, url]) => knownIds.has(id) && cleanLink(url)));
   return { imported, variants: variantChoices, progress, focus, notes: stringEntries(raw.notes),
     links, updatedAt: number(raw.updatedAt) ?? 0 };
+}
+
+function alignProgramRecord(record, source, target) {
+  if (source === target) return record;
+  const ids = new Map();
+  const layouts = source.days.map((oldDay, dayIndex) => {
+    const positions = new Map();
+    target.days[dayIndex]?.forEach((slot, index) => {
+      [slot, ...slot.variants].forEach((move, variant) => {
+        [move.id, ...(move.previousIds || [])].forEach(id => {
+          positions.set(id, { index, variant });
+          ids.set(id, move.id);
+        });
+      });
+    });
+    return oldDay.map(slot => [slot, ...slot.variants].map(move => positions.get(move.id)));
+  });
+  const variants = {};
+  for (const [key, choice] of Object.entries(record.variants)) {
+    const [day, position] = key.split('-').map(Number);
+    const next = layouts[day]?.[position]?.[choice];
+    if (next) variants[`${day}-${next.index}`] = next.variant;
+  }
+  function remap(entries, combine) {
+    const mapped = {};
+    for (const [key, value] of Object.entries(entries)) {
+      const match = key.match(/^(\d+)-(\d+)-(\d+)(.*)$/);
+      if (!match) continue;
+      const [, day, position, variant, suffix] = match;
+      const next = layouts[day]?.[position]?.[variant];
+      if (!next) continue;
+      const newKey = `${day}-${next.index}-${next.variant}${suffix}`;
+      mapped[newKey] = Object.hasOwn(mapped, newKey) ? combine(mapped[newKey], value) : value;
+    }
+    return mapped;
+  }
+  const imported = record.imported.flatMap(workout => {
+    const layout = layouts[workout.day];
+    const newDay = target.days[workout.day];
+    if (!layout || !newDay) return [];
+    const pair = position => layout[position]?.[workout.variants?.[position] || 0] || layout[position]?.find(Boolean);
+    const mapping = workout.mapping.map(position => pair(position)?.index ?? -1);
+    const choices = newDay.map(() => 0);
+    const performed = newDay.map(slot => describeMovement(slot));
+    for (const position of new Set(workout.mapping)) {
+      const next = pair(position);
+      if (!next) continue;
+      choices[next.index] = next.variant;
+      performed[next.index] = workout.performed?.[position] ||
+        describeMovement(source.days[workout.day][position], workout.variants?.[position]);
+    }
+    return [{ ...workout, mapping, variants: choices, performed }];
+  });
+  const links = {};
+  for (const [id, link] of Object.entries(record.links)) {
+    const next = ids.get(id);
+    if (next && (id === next || !Object.hasOwn(links, next))) links[next] = link;
+  }
+  return {
+    ...record, variants, imported,
+    notes: remap(record.notes, (first, second) => first && second && first !== second ? `${first}\n${second}` : first || second),
+    progress: remap(record.progress, (first, second) => ({ ...first, ...second })),
+    focus: remap(record.focus, first => first),
+    links
+  };
 }
 
 function encodeMedia(blob) {

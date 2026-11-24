@@ -260,6 +260,9 @@ h1 {
 .page { padding: 33px 0 44px; }
 .page h1 { margin-bottom: 12px; }
 .programs { max-width: 850px; margin-inline: auto; }
+.programs-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.programs-header h1 { margin: 0; }
+.programs-header .file-label { margin: 0; }
 .cover {
   min-height: 310px;
   display: grid;
@@ -339,7 +342,7 @@ select {
 .review-header span, .review-amount { color: var(--secondary); font-size: .83rem; white-space: nowrap; }
 .review .intro { margin: 4px 0 11px; font-size: .87rem; }
 .review-list { border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
-.import-exercise + .import-exercise { border-top: 1px solid var(--line); }
+.import-group + .import-group { border-top: 1px solid var(--line); }
 .import-exercise summary {
   list-style: none;
   display: grid;
@@ -379,7 +382,8 @@ select {
 .import-set select { font-size: .8rem; }
 .remove-set { min-height: 36px; font-size: .77rem; }
 .add-set { margin: 5px 0 11px; }
-.import-variant { margin: 8px 0; }
+.import-variant { padding: 10px 11px 0; }
+.import-variant select { min-height: 39px; }
 .import-variant select { margin-top: 3px; }
 .import-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
 .import-receipt { border-top: 1px solid var(--line); padding-block: 15px; margin-top: 15px; }
@@ -406,6 +410,7 @@ dialog::backdrop { background: #050507c2; }
 
 .exercise-tools { display: flex; justify-content: end; gap: 6px; flex-shrink: 0; }
 .history-link { white-space: nowrap; }
+.previous-movement { margin: 8px 4px 1px; color: var(--secondary); font-size: .83rem; line-height: 1.35; }
 .variant-control {
   display: flex; align-items: center; gap: 7px; margin: -4px 0 11px;
   color: var(--secondary); font-size: .83rem; max-width: 460px;
@@ -419,30 +424,33 @@ dialog::backdrop { background: #050507c2; }
 .set-picker small { display: flex; align-items: center; gap: 3px; color: var(--secondary); font-size: .68rem; }
 .set-picker small svg { width: 11px; height: 11px; }
 .set-picker.skipped .set-index { color: var(--red); }
-.plan-actions { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+.plan-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .plan-actions .button:only-child { grid-column: 1 / -1; }
 .plan-footer .reset-exercise { width: auto; min-height: 31px; margin: 5px 0 0; font-size: .79rem; }
+.complete-day { display: flex; justify-content: center; margin: -1px 0 20px; }
 .text-technique { margin: 0; padding-top: 14px; background: none; pointer-events: auto; }
 .muscles {
   margin-top: 10px; padding: 13px 14px;
   border: 1px solid var(--line); border-radius: 20px; background: var(--surface);
 }
 .muscles h2 { font-size: 1.05rem; font-weight: 690; letter-spacing: -.02em; }
-.muscles-content { display: flex; align-items: center; gap: clamp(10px, 2vw, 22px); margin-top: 8px; }
-.muscles-figures { display: flex; flex: none; gap: 8px; }
-.muscle-figure { display: grid; justify-items: center; align-items: end; gap: 3px; color: var(--secondary); font-size: .7rem; }
-.muscle-figure svg { width: auto; height: clamp(95px, 10vw, 130px); }
-.body-outline { fill: #29292d; stroke: #65636a; stroke-width: 1.1; stroke-linejoin: round; }
-.body-detail { fill: none; stroke: #57555d; stroke-width: 1.1; }
-.muscle-inactive { fill: #323238; stroke: #59575f; stroke-width: .85; }
-.muscle-major { fill: #ed7870; stroke: #ffb0a9; stroke-width: .9; }
-.muscle-minor { fill: #984e50; stroke: #c47b7b; stroke-width: .9; }
-.muscle-labels { display: grid; gap: 8px; margin: 0; min-width: 0; }
+.muscles-content { display: grid; gap: 10px; margin-top: 10px; }
+.muscles-figures {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  border-radius: 13px; background: #fafafa; padding: 10px 6px 9px;
+}
+.muscle-figure { display: grid; justify-items: center; align-items: end; gap: 5px; color: #45454c; font-size: .79rem; }
+.muscle-figure svg { width: min(100%, 145px); height: auto; }
+.body-outline { fill: #fafafa; stroke: #ceced1; stroke-width: 1.1; stroke-linejoin: round; }
+.muscle-inactive { fill: #dedee1; stroke: #fafafa; stroke-width: .7; }
+.muscle-major { fill: #df3038; stroke: #fafafa; stroke-width: .7; }
+.muscle-minor { fill: #f4b931; stroke: #fafafa; stroke-width: .7; }
+.muscle-labels { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; min-width: 0; }
 .muscle-labels dt { color: var(--secondary); font-size: .74rem; }
 .muscle-labels dd { margin: 1px 0 0; font-size: .84rem; font-weight: 620; }
 .muscle-labels i { display: inline-block; width: 7px; height: 7px; margin-right: 1px; border-radius: 50%; }
-.major-key { background: #ed7870; }
-.minor-key { background: #984e50; }
+.major-key { background: #df3038; }
+.minor-key { background: #f4b931; }
 .history-dialog { width: min(830px, calc(100% - 26px)); }
 .history-scroll {
   --type-width: 91px;
@@ -460,6 +468,7 @@ dialog::backdrop { background: #050507c2; }
 .history-table thead th, .history-table tbody th { background: #222226; font-size: .8rem; font-weight: 650; }
 .history-table thead th { position: sticky; top: 0; z-index: 2; }
 .history-table thead th:has(time) { scroll-snap-align: start; }
+.history-movement { display: block; max-width: 18ch; margin-top: 3px; white-space: normal; color: var(--secondary); font-weight: 500; }
 .history-table .history-type, .history-table .history-number {
   position: sticky;
   z-index: 1;
@@ -542,6 +551,8 @@ dialog::backdrop { background: #050507c2; }
   .technique-copy ul { font-size: .83rem; }
   .plan { padding: 13px 11px 11px; }
   .exercise-footer { margin-bottom: 10px; }
+  .programs-header { flex-wrap: wrap; }
+  .muscle-figure svg { width: min(100%, 130px); }
   .page { padding-top: 23px; }
   .transfer > .intro { margin-bottom: 13px; }
   .cover { grid-template-columns: 1fr; }

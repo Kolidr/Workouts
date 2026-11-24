@@ -11,6 +11,7 @@ let writes = Promise.resolve();
 const mediaUrls = new Map();
 const choosePackage = '<label class="button primary file-label">Загрузить файл<input type="file" id="workspace-file" accept=".json,application/json"></label>';
 const iconParts = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.3"/><rect x="14" y="3" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/>',
   barbell: '<path d="M9 12h6M2 12h2m16 0h2"/><rect x="4" y="6" width="5" height="12" rx="1.5"/><rect x="15" y="6" width="5" height="12" rx="1.5"/>',
   download: '<path d="M12 3v12m-4-4 4 4 4-4M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
@@ -62,7 +63,7 @@ const slotKey = (day, exercise) => `${day}-${exercise}`;
 const selectedVariant = (day, exercise) => state.variants[slotKey(day, exercise)] || 0;
 function movementAt(day, position, variant = 0) {
   const item = days[day][position];
-  return { ...item, ...item.variants[variant - 1] };
+  return { ...item, ...movementChoice(item, variant) };
 }
 const exercise = () => movementAt(state.day, state.exercise, selectedVariant(state.day, state.exercise));
 const exerciseKey = () => `${slotKey(state.day, state.exercise)}-${selectedVariant(state.day, state.exercise)}`;
@@ -158,14 +159,18 @@ function technique(item) {
   </section>`;
 }
 
-function recordedHistory(item) {
-  const variant = selectedVariant(state.day, state.exercise);
-  const matches = workout => workout.day === state.day && workout.mapping.includes(state.exercise) &&
-    (workout.variants?.[state.exercise] || 0) === variant;
+function recordedHistory() {
+  const slot = days[state.day][state.exercise];
+  const matches = workout => workout.day === state.day && workout.mapping.includes(state.exercise);
   return state.imported.filter(matches).map(workout => ({
       date: workout.date,
+      movement: workout.performed?.[state.exercise] || describeMovement(slot, workout.variants?.[state.exercise]),
       sets: withRestBefore(workout).filter((_, index) => workout.mapping[index] === state.exercise)
     })).sort((first, second) => second.date.localeCompare(first.date));
+}
+
+function movementLabel(move) {
+  return `${move.alternative ? 'Аналог' : 'Основное'} · ${escapeText(move.title)}`;
 }
 
 function withRestBefore(workout) {
@@ -185,7 +190,7 @@ function progressFor(item) {
 }
 
 function historyDialog(item) {
-  const records = recordedHistory(item);
+  const records = recordedHistory();
   if (!records.length) {
     openDialog('История упражнения', `<p class="intro">${escapeText(item.title)}</p><p class="intro">Здесь появятся подходы из подтверждённых тренировок Garmin.</p>`, 'history-dialog');
     return;
@@ -210,7 +215,7 @@ function historyDialog(item) {
   openDialog('История упражнения', `<p class="intro">${escapeText(item.title)}</p>
     <div class="history-scroll" tabindex="0" aria-label="История по датам, таблица прокручивается">
       <table class="history-table">
-        <thead><tr><th scope="col" class="history-type">Тип</th><th scope="col" class="history-number">Подход</th>${records.map(record => `<th scope="col"><time datetime="${record.date}">${displayDate(record.date)}</time></th>`).join('')}</tr></thead>
+        <thead><tr><th scope="col" class="history-type">Тип</th><th scope="col" class="history-number">Подход</th>${records.map(record => `<th scope="col"><time datetime="${record.date}">${displayDate(record.date)}</time><small class="history-movement">${movementLabel(record.movement)}</small></th>`).join('')}</tr></thead>
         ${historyRows}
       </table>
     </div>`, 'history-dialog');
@@ -219,7 +224,8 @@ function historyDialog(item) {
 function plan(item) {
   const warm = item.warm || 0;
   const { limit: count, active, statuses } = progressFor(item);
-  const history = recordedHistory(item)[0];
+  const history = recordedHistory()[0];
+  const showMovement = history && (history.movement.alternative || history.movement.id !== item.id);
   const rowCount = Math.max(count, history?.sets.length || 0);
   const rows = Array.from({ length: rowCount }, (_, index) => {
     const isWarm = index < warm;
@@ -246,15 +252,18 @@ function plan(item) {
     <div class="plan-header"><h2 id="plan-title">Подходы</h2>
       <span class="current-status">${active !== undefined ? `<i></i> Сейчас ${active + 1} из ${count}` : 'Подходы отмечены'}</span>
     </div>
+    ${showMovement ? `<p class="previous-movement">Прошлая тренировка · ${movementLabel(history.movement)}</p>` : ''}
     <div class="table-head">
       <span>Подход</span><span>Повт.</span>
       <span>${history ? `<time datetime="${history.date}">${displayDate(history.date)}</time>` : 'Нет истории'}</span><span></span>
     </div>
     <div class="set-table">${rows}</div>
     <div class="plan-footer">
-      <div class="plan-actions">${button(next === 'mark' ? 'Отметить подход' : 'Следующее упражнение', next, 'primary',
+      <div class="plan-actions">
+        ${next === 'mark' ? button('Пропустить подход', 'skip-set') : ''}
+        ${button(next === 'mark' ? 'Отметить подход' : 'Следующее упражнение', next, 'primary',
         next === 'next' && state.exercise === days[state.day].length - 1 ? 'disabled' : '')}
-        ${next === 'mark' ? button('Пропустить подход', 'skip-set') : ''}</div>
+      </div>
       ${Object.keys(statuses).length ? button(`${icon('undo')} Снять все отметки`, 'reset-exercise', 'quiet reset-exercise') : ''}
     </div>
   </section>`;
@@ -289,6 +298,7 @@ function workout() {
           ${button(`${icon('chevron')} Предыдущее`, 'previous', 'quiet previous', state.exercise === 0 ? 'disabled' : '')}
           ${button(`Следующее ${icon('chevron')}`, 'next', 'quiet', state.exercise === days[state.day].length - 1 ? 'disabled' : '')}
         </div>
+        <div class="complete-day">${button(`${icon('check')} Завершить тренировку`, 'finish-day')}</div>
       </article>
     </div>`;
 }
@@ -300,7 +310,10 @@ function programs() {
       ${choosePackage}</section>`;
   }
   return `<section class="page programs">
-    <h1>Программы</h1>
+    <div class="programs-header"><h1>Программы</h1>
+      <label class="button secondary file-label">${icon('plus')} Добавить программу
+        <input type="file" id="workspace-file" accept=".json,application/json" aria-label="Добавить программу файлом JSON"></label>
+    </div>
     <div class="cover">
       <div class="cover-copy"><h2>${escapeText(state.program.title)}</h2><p>${escapeText(state.program.author)}</p>
         <p class="cover-meta">Дней: ${days.length} · Упражнений: ${days.flat().length}</p>
@@ -374,12 +387,11 @@ function fitSetKind(draft, position) {
   return slot >= 0 && ordinal < (days[draft.day][slot].warm || 0) ? 'warm' : 'work';
 }
 
-function importVariantControl(item, index, selected) {
-  if (!item?.variants?.length) return '';
-  return `<label class="import-variant">Аналог
-    <select data-import-variant="${index}">
-    <option value="0" ${selected === 0 ? 'selected' : ''}>${escapeText(days[state.draft.day][index].title)}</option>
-    ${item.variants.map((variant, id) => `<option value="${id + 1}" ${selected === id + 1 ? 'selected' : ''}>${escapeText(variant.title)}</option>`).join('')}
+function importVariantControl(slot, index, selected) {
+  if (!slot?.variants.length) return '';
+  return `<label class="import-variant">Выполненный вариант
+    <select data-import-variant="${index}" aria-label="Выполненный вариант · ${escapeText(slot.title)}">
+    ${[slot, ...slot.variants].map((_, variant) => `<option value="${variant}" ${selected === variant ? 'selected' : ''}>${movementLabel(describeMovement(slot, variant))}</option>`).join('')}
     </select></label>`;
 }
 
@@ -422,7 +434,9 @@ function review(draft, expanded = new Set()) {
     if (!item && !setIndexes.length) return '';
     const planned = item ? setCount(item) : 0;
     const matching = item && (setIndexes.length === planned || (item.optional && setIndexes.length === planned + 1));
-    return `<details class="import-exercise" data-exercise="${index}" ${expanded.has(index) ? 'open' : ''}>
+    return `<div class="import-group">
+      ${importVariantControl(programDay[index], index, draft.variants[index])}
+      <details class="import-exercise" data-exercise="${index}" ${expanded.has(index) ? 'open' : ''}>
       <summary><span class="review-index">${item ? index + 1 : '—'}</span>
         <span class="review-title"><strong>${escapeText(item?.title || 'Без упражнения')}</strong>
           <small>${item ? escapeText(setSummary(item)) : 'Подходы сохранятся в тренировке'}</small></span>
@@ -430,15 +444,14 @@ function review(draft, expanded = new Set()) {
         ${icon('down')}
       </summary>
       <div class="import-sets">
-        ${importVariantControl(item, index, draft.variants[index])}
         ${setIndexes.length ? setIndexes.map(position => editableSet(draft, position, index)).join('') : '<p>Подходов пока нет.</p>'}
         ${item ? button('Добавить подход', 'add-fit-set', 'secondary add-set', `data-index="${index}"`) : ''}
       </div>
-    </details>`;
+    </details></div>`;
   }).join('');
   return `<section class="review">
     <div class="review-header"><h2>Проверка подходов</h2><span>${assigned} из ${draft.sets.length} распределено</span></div>
-    <p class="intro">Подходы расставлены по плану дня. Раскройте упражнение, чтобы проверить и изменить подходы, вес, повторения и отдых.</p>
+    <p class="intro">Выберите выполненный вариант. Раскройте упражнение, чтобы изменить подходы, вес, повторения и отдых.</p>
     <div class="review-list">${rows}</div>
     <div class="import-actions">${button('Подтвердить тренировку', 'confirm-fit', 'primary', draft.sets.length ? '' : 'disabled')}
       ${button('Распределить заново', 'reset-fit', 'secondary')}</div>
@@ -533,7 +546,7 @@ function updatePlan(action, index) {
   const next = progressFor(item).active;
   const nextControl = action === 'select-set' || action === 'undo-set'
     ? document.querySelector(`.set-picker[data-index="${next}"]`)
-    : document.querySelector('.plan-actions button:not(:disabled)');
+    : document.querySelector(`.plan-actions [data-action="${action === 'skip-set' ? 'skip-set' : 'mark'}"]:not(:disabled)`);
   nextControl?.focus({ preventScroll: true });
   saveLocal();
 }
@@ -563,11 +576,12 @@ async function readPersonalFile(file) {
     state.pendingRestore = pending;
     const sameProgram = state.program?.id === pending.program.id;
     const importCount = pending.snapshot?.imported.length || 0;
+    const update = sameProgram && !pending.snapshot;
     const replace = Boolean(state.program && (!sameProgram || pending.snapshot));
     openDialog('Загрузка данных', `<p class="intro">${escapeText(pending.program.title)} · Записей в файле: ${importCount}</p>
       <div class="dialog-actions">
-        ${state.program && sameProgram ? button('Объединить', 'confirm-merge', 'primary') : ''}
-        ${button(replace ? 'Заменить данные' : 'Загрузить', 'confirm-restore', replace ? 'secondary' : 'primary')}
+        ${sameProgram ? button(update ? 'Обновить программу' : 'Объединить', 'confirm-merge', 'primary') : ''}
+        ${update ? '' : button(replace ? 'Заменить данные' : 'Загрузить', 'confirm-restore', replace ? 'secondary' : 'primary')}
       </div>`);
   } catch (error) {
     announce(error instanceof SyntaxError ? 'Файл не удалось прочитать как JSON.' : error.message);
@@ -598,10 +612,14 @@ async function restoreWorkspace(merge) {
     await writes;
     const blank = { notes: {}, links: {}, variants: {}, progress: {}, focus: {}, imported: [], updatedAt: 0 };
     const incoming = pending.snapshot || blank;
-    const record = merge ? mergeRecords(workspaceRecord(), incoming) : incoming;
-    const next = { ...record, program: pending.program, updatedAt: Date.now() };
-    next.revision = await writeWorkspace(next, pending.media, state.revision);
-    applyWorkspace(next, pending.media);
+    const keepProgram = merge && (state.program.edition || 1) > pending.program.edition;
+    const program = keepProgram ? state.program : pending.program;
+    const media = keepProgram ? state.media : pending.media;
+    const record = merge ? mergeRecords(alignProgramRecord(workspaceRecord(), state.program, program),
+      alignProgramRecord(incoming, pending.program, program)) : incoming;
+    const next = { ...record, program, updatedAt: Date.now() };
+    next.revision = await writeWorkspace(next, media, state.revision);
+    applyWorkspace(next, media);
     state.pendingRestore = null;
     state.screen = 'programs';
     dialog.close();
@@ -705,6 +723,31 @@ document.addEventListener('click', async event => {
       dialog.close();
       updatePlan(action);
       return;
+    case 'finish-day':
+      openDialog('Завершить тренировку?', `<p class="intro">Отметки всех подходов за день ${state.day + 1} будут сброшены.</p>
+        ${button('Завершить тренировку', 'confirm-finish-day', 'primary')}`);
+      return;
+    case 'confirm-finish-day': {
+      const progress = state.progress;
+      const focus = state.focus;
+      const keep = entries => Object.fromEntries(Object.entries(entries).filter(([key]) => !key.startsWith(`${state.day}-`)));
+      control.disabled = true;
+      state.progress = keep(progress);
+      state.focus = keep(focus);
+      try {
+        await saveLocal();
+      } catch {
+        state.progress = progress;
+        state.focus = focus;
+        control.disabled = false;
+        return;
+      }
+      dialog.close();
+      state.exercise = 0;
+      state.screen = 'days';
+      announce('Тренировка завершена.');
+      break;
+    }
     case 'reset-fit':
       if (!validateSetFields()) return;
       autoMap(state.draft);
@@ -738,7 +781,8 @@ document.addEventListener('click', async event => {
       const prior = state.imported;
       const { id, date, day, mapping, variants, initialRest } = workout;
       const sets = workout.sets.map((set, position) => ({ ...set, kind: fitSetKind(workout, position) }));
-      state.imported = [{ id, date, day, mapping, variants, sets, initialRest, updatedAt: Date.now() },
+      const performed = days[day].map((slot, index) => describeMovement(slot, variants[index]));
+      state.imported = [{ id, date, day, mapping, variants, performed, sets, initialRest, updatedAt: Date.now() },
         ...prior.filter(existing => existing.id !== id)];
       try {
         await saveLocal();
