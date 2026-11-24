@@ -330,6 +330,7 @@ function chooseDay() {
   return `<section class="page day-picker">
     <button type="button" class="text-button back" data-action="programs">${icon('chevron')} Программы</button>
     <h1>${escapeText(state.program.title)}</h1><p class="intro">${escapeText(state.program.author)}</p>
+    <a class="analytics-jump" href="#analytics-title">К аналитике</a>
     <div class="day-cards" aria-label="Выберите день">${days.map((day, index) => `
       <article class="day-choice">
         <button type="button" class="day-card" data-action="day" data-index="${index}">
@@ -339,6 +340,7 @@ function chooseDay() {
         ${dayMuscles(index, day.map((_, position) => movementAt(index, position, selectedVariant(index, position))))}
       </article>`).join('')}
     </div>
+    ${programAnalytics(state.program, state.imported)}
   </section>`;
 }
 
@@ -1129,6 +1131,13 @@ document.addEventListener('change', event => {
 
 app.addEventListener('change', async event => {
   const target = event.target;
+  if (target.id === 'analytics-weeks' || target.id === 'analytics-movement') {
+    if (target.id === 'analytics-weeks') analyticsSelection.weeks = Number(target.value);
+    else analyticsSelection.movement = target.value;
+    target.closest('.program-analytics').outerHTML = programAnalytics(state.program, state.imported);
+    document.getElementById(target.id)?.focus({ preventScroll: true });
+    return;
+  }
   if (target.id === 'movement-variant') {
     state.variants[slotKey(state.day, state.exercise)] = Number(target.value);
     saveLocal();
@@ -1225,7 +1234,28 @@ async function start() {
   } catch {
     announce('Локальное хранилище браузера недоступно.');
   }
+  const view = readUpdateView(state.program?.id);
+  if (state.program && view) {
+    if (['programs', 'days', 'workout', 'garmin', 'data'].includes(view.screen)) state.screen = view.screen;
+    if (Number.isInteger(view.day) && days[view.day]) state.day = view.day;
+    if (Number.isInteger(view.exercise) && days[state.day][view.exercise]) state.exercise = view.exercise;
+    if ([4, 8, 12].includes(view.weeks)) analyticsSelection.weeks = view.weeks;
+    if (typeof view.movement === 'string') analyticsSelection.movement = view.movement;
+  }
   render();
+  if (Number.isFinite(view?.scroll)) requestAnimationFrame(() => window.scrollTo(0, view.scroll));
+  installAppUpdater({
+    canRefresh: manual => !state.busy && !state.techniqueJob && !state.draft && !dialog.open &&
+      (manual || (state.screen !== 'workout' && !document.activeElement?.matches('input, select, textarea'))),
+    async saveView() {
+      await writes;
+      try {
+        sessionStorage.setItem(updateViewKey, JSON.stringify({ programId: state.program?.id,
+          screen: state.screen, day: state.day, exercise: state.exercise, scroll: window.scrollY, ...analyticsSelection }));
+      } catch {}
+    },
+    report: announce
+  });
 }
 
 start();
