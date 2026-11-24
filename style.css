@@ -440,11 +440,11 @@ dialog::backdrop { background: #050507c2; }
   border-radius: 13px; background: #fafafa; padding: 10px 6px 9px;
 }
 .muscle-figure { display: grid; justify-items: center; align-items: end; gap: 5px; color: #45454c; font-size: .79rem; }
-.muscle-figure svg { width: min(100%, 145px); height: auto; }
-.body-outline { fill: #fafafa; stroke: #ceced1; stroke-width: 1.1; stroke-linejoin: round; }
-.muscle-inactive { fill: #dedee1; stroke: #fafafa; stroke-width: .7; }
-.muscle-major { fill: #df3038; stroke: #fafafa; stroke-width: .7; }
-.muscle-minor { fill: #f4b931; stroke: #fafafa; stroke-width: .7; }
+.muscle-figure svg { width: min(100%, 158px); height: auto; }
+.body-outline { fill: #fafafa; stroke: #dedee0; stroke-width: 1.05; stroke-linejoin: round; }
+.muscle-inactive { fill: #e2e2e4; stroke: #fafafa; stroke-width: .6; }
+.muscle-major { fill: #df3038; stroke: #fafafa; stroke-width: .6; }
+.muscle-minor { fill: #f4b931; stroke: #fafafa; stroke-width: .6; }
 .muscle-labels { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; min-width: 0; }
 .muscle-labels dt { color: var(--secondary); font-size: .74rem; }
 .muscle-labels dd { margin: 1px 0 0; font-size: .84rem; font-weight: 620; }
